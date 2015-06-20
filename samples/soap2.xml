@@ -1,0 +1,60 @@
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+    <env:Header xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+        <eb:Messaging xmlns="" xmlns:S11="http://schemas.xmlsoap.org/soap/envelope/"
+                      xmlns:eb="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/"
+                      xmlns:ns4="http://www.w3.org/2000/09/xmldsig#"
+                      xmlns:ns5="http://docs.oasis-open.org/ebxml-bp/ebbp-signals-2.0"
+                      xmlns:ns6="http://www.w3.org/1999/xlink"
+                      xmlns:xmime="http://www.w3.org/2005/05/xmlmime" env:mustUnderstand="true">
+            <eb:UserMessage mpc="http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/defaultMPC">
+                <eb:MessageInfo>
+                    <eb:Timestamp>2015-05-23T12:48:27.984Z</eb:Timestamp>
+                    <eb:MessageId>6abf0aba-29ab-4a35-85f4-9a4468df0938@domibus.eu</eb:MessageId>
+                </eb:MessageInfo>
+                <eb:PartyInfo>
+                    <eb:From>
+                        <eb:PartyId type="http://www.domibus.eu/exampleType">AT</eb:PartyId>
+                        <eb:Role>GW</eb:Role>
+                    </eb:From>
+                    <eb:To>
+                        <eb:PartyId type="http://www.domibus.eu/exampleType">DE</eb:PartyId>
+                        <eb:Role>GW</eb:Role>
+                    </eb:To>
+                </eb:PartyInfo>
+                <eb:CollaborationInfo>
+                    <eb:Service type="exampleService">AS4</eb:Service>
+                    <eb:Action>SendMessageAction</eb:Action>
+                    <eb:ConversationId>1</eb:ConversationId>
+                </eb:CollaborationInfo>
+                <eb:MessageProperties>
+                    <eb:Property name="originalSender">Corner1</eb:Property>
+                    <eb:Property name="finalRecipient">Corner4</eb:Property>
+                </eb:MessageProperties>
+                <eb:PayloadInfo>
+                    <eb:PartInfo>
+                        <eb:Description xml:lang="en-US">business document</eb:Description>
+                        <eb:PartProperties>
+                            <eb:Property name="MimeType">text/xml</eb:Property>
+                        </eb:PartProperties>
+                    </eb:PartInfo>
+                    <eb:PartInfo href="asic-s@e-codex.eu">
+                        <eb:Description xml:lang="en-US">not really asic-s container</eb:Description>
+                        <eb:PartProperties>
+                            <eb:Property name="MimeType">application/vnd.etsi.asic-s+zip</eb:Property>
+                        </eb:PartProperties>
+                    </eb:PartInfo>
+                    <eb:PartInfo href="submissionAcceptance@e-codex.eu">
+                        <eb:Description xml:lang="en-US">submission acceptance evidence</eb:Description>
+                        <eb:PartProperties>
+                            <eb:Property name="MimeType">text/plain</eb:Property>
+                        </eb:PartProperties>
+                    </eb:PartInfo>
+                </eb:PayloadInfo>
+            </eb:UserMessage>
+        </eb:Messaging>
+    </env:Header>
+    <soap:Body>
+        <bodyload/>
+    </soap:Body>
+</soap:Envelope>
+
