@@ -23,7 +23,7 @@ import java.util.List;
  */
 public class Test {
 
-  public static final String SAMPLE2_SOAP_MSG = readFile("soap2.xml");
+  public static final String SAMPLE2_SOAP_MSG = readFile("samples/soap2.xml");
 
   @BeforeClass
   public static void init() throws WSSecurityException {
@@ -63,7 +63,7 @@ public class Test {
 
   @org.junit.Test
   public void testXPath() throws Exception {
-    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("soap_serialized.bin"), true);
+    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap_serialized.bin"), true);
     Node node = message1.getSOAPPart();
     System.out.println(prettyPrint(node));
 
@@ -130,7 +130,7 @@ public class Test {
 
   @org.junit.Test
   public void testSerializeDeserializeSerialize() throws Exception {
-    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("soap_serialized.bin"), true);
+    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap_serialized.bin"), true);
     System.out.println(describe(message1));
     SOAPMessage plain1 = deserializeSOAPMessage(serializeSOAPMessage(message1.getMimeHeaders(), message1));
     System.out.println(describe(plain1));
@@ -155,7 +155,7 @@ public class Test {
 
   @org.junit.Test
   public void testDecryptEncryptDecrypt() throws Exception {
-    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("soap_serialized.bin"));
+    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap_serialized.bin"));
 
     Node firstChild = message1.getSOAPHeader().getFirstChild();
     System.out.println(firstChild.getLocalName());
@@ -180,6 +180,38 @@ public class Test {
     System.out.println(describe(packed2));
 
     writeFile("/Users/yerlibilgin/Desktop/2.xml", prettyPrint(packed2.getSOAPHeader().getFirstChild()));
+
+    SOAPMessage plain3 = verifyAndDecrypt(packed2, Corner.CORNER_3);
+    System.out.println(describe(plain3));
+  }
+
+
+  @org.junit.Test
+  public void testSignAndVerify() throws Exception {
+    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap_serialized.bin"));
+
+    Node firstChild = message1.getSOAPHeader().getFirstChild();
+    System.out.println(firstChild.getLocalName());
+
+    firstChild.getAttributes().removeNamedItem("xmlns");
+
+    writeFile("/Users/yerlibilgin/Desktop/original.xml", prettyPrint(message1.getSOAPHeader().getFirstChild().getNextSibling()));
+
+    SOAPMessage plain1 = verifyAndDecrypt(message1, Corner.CORNER_3);
+    System.out.println(describe(plain1));
+
+    SOAPMessage signed = sign(plain1, Corner.CORNER_3);
+    System.out.println(describe(signed));
+
+    writeFile("/Users/yerlibilgin/Desktop/signed.xml", prettyPrint(signed.getSOAPHeader().getFirstChild()));
+
+    SOAPMessage plain2 = verifyAndDecrypt(signed, Corner.CORNER_2);
+    System.out.println(describe(plain2));
+
+    SOAPMessage packed2 = sign(plain2, Corner.CORNER_2);
+    System.out.println(describe(packed2));
+
+    writeFile("/Users/yerlibilgin/Desktop/plain.xml", prettyPrint(packed2.getSOAPHeader().getFirstChild()));
 
     SOAPMessage plain3 = verifyAndDecrypt(packed2, Corner.CORNER_3);
     System.out.println(describe(plain3));

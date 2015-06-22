@@ -6,7 +6,7 @@
 
     <groupId>minder</groupId>
     <artifactId>AS4Utils</artifactId>
-    <version>1.0.3-a5</version>
+    <version>1.0.4</version>
 
     <build>
         <plugins>
