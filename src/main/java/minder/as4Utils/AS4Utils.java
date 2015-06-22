@@ -479,6 +479,103 @@ public class AS4Utils {
 
 
   /**
+   * Signs the soap message (no encrpytion)
+   * <p/>
+   * Strips out the ws:security header if any.
+   * <p/>
+   * Assumes that the attachments are already decrypted.
+   *
+   * @param message
+   */
+  public static SOAPMessage sign(SOAPMessage message, Corner sender) {
+    try {
+      message.saveChanges();
+      SOAPMessage newMessage = deserializeSOAPMessage(serializeSOAPMessage(message.getMimeHeaders(), message));
+      newMessage.removeAllAttachments();
+      stripWSSEC(newMessage.getSOAPHeader());
+      Document doc = newMessage.getSOAPPart();
+
+      WSSecHeader secHeader = new WSSecHeader();
+      secHeader.insertSecurityHeader(doc);
+
+      final List<Attachment> attachments = new ArrayList<>();
+      message.getAttachments().forEachRemaining(new Consumer<AttachmentPart>() {
+        @Override
+        public void accept(final AttachmentPart o) {
+          final Attachment attachment = new Attachment();
+          attachment.setMimeType(o.getContentType());
+          o.getAllMimeHeaders().forEachRemaining(new Consumer<MimeHeader>() {
+            @Override
+            public void accept(MimeHeader mime) {
+              attachment.addHeader(mime.getName(), mime.getValue());
+            }
+          });
+          attachment.setId(o.getContentId());
+          try {
+            attachment.setSourceStream(new ByteArrayInputStream(o.getRawContentBytes()));
+          } catch (SOAPException e) {
+            throw new RuntimeException(e);
+          }
+
+          attachments.add(attachment);
+        }
+      });
+
+      WSSecSignature signature = new WSSecSignature();
+      //if C2 is sending, then sign with C2 key.
+      signature.setUserInfo(sender == Corner.CORNER_2 ? "testGateway1" : "testGateway2", "123456");
+      signature.getParts().add(new WSEncryptionPart("Messaging", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/", "Content"));
+      signature.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Element"));
+      signature.getParts().add(new WSEncryptionPart("cid:Attachments", "Content"));
+      signature.setDigestAlgo(WSConstants.SHA256);
+      signature.setSignatureAlgorithm("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
+      signature.setKeyIdentifierType(WSConstants.BST_DIRECT_REFERENCE);
+
+      AttachmentCallbackHandler attachmentCallbackHandler = new AttachmentCallbackHandler(attachments);
+      signature.setAttachmentCallbackHandler(attachmentCallbackHandler);
+
+      //if C2 is sending, then sign with C2 key.
+      doc = signature.build(doc, sender == Corner.CORNER_2 ? c2Crypto : c3Crypto, secHeader);
+      if (LOG.isDebugEnabled()) {
+        String outputString = XMLUtils.PrettyDocumentToString(doc);
+        LOG.debug(outputString);
+      }
+
+      for (Attachment at : attachmentCallbackHandler.getResponseAttachments()) {
+        System.out.println("ATID " + at.getId());
+        InputStream is = at.getSourceStream();
+        if (is.available() <= 0)
+          continue;
+
+        AttachmentPart ap = newMessage.createAttachmentPart();
+        Map<String, String> headers = at.getHeaders();
+        for (String key : headers.keySet()) {
+          ap.addMimeHeader(key, headers.get(key));
+        }
+
+        ap.setContentId(at.getId());
+        ap.setContentType(at.getMimeType());
+
+        int r = 0;
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        while ((r = is.read()) != -1) {
+          baos.write(r);
+        }
+
+        byte[] val = baos.toByteArray();
+        ap.setRawContentBytes(val, 0, val.length, at.getMimeType());
+        newMessage.addAttachmentPart(ap);
+      }
+
+      newMessage.saveChanges();
+      return newMessage;
+    } catch (Throwable e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+
+  /**
    * Signs then encrypts soap message together with the attachments.
    * <p/>
    * Strips out the ws:security header if any.
