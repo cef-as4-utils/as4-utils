@@ -15,23 +15,19 @@ import org.apache.wss4j.dom.handler.WSHandlerResult;
 import org.apache.wss4j.dom.message.WSSecEncrypt;
 import org.apache.wss4j.dom.message.WSSecHeader;
 import org.apache.wss4j.dom.message.WSSecSignature;
-import org.oasis_open.docs.ebxml_msg.ebms.v3_0.ns.core._200704.*;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 import javax.security.auth.callback.CallbackHandler;
 import javax.xml.namespace.NamespaceContext;
-import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.soap.*;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
-import javax.xml.ws.Holder;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
@@ -51,6 +47,8 @@ public class AS4Utils {
   static SOAPConnectionFactory soapConnectionFactory = null;
 
   private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(AS4Utils.class);
+  private static HashMap<String, byte[]> keyStoreBytes = new HashMap<>();
+
 
   static {
     try {
@@ -271,6 +269,13 @@ public class AS4Utils {
 
   public static void init(String c2, String c3, String trust) {
     try {
+      setKeyStoreBytes("c2.jks", readResource("c2.jks"));
+      setKeyStoreBytes("c3.jks", readResource("c3.jks"));
+      setKeyStoreBytes("trst.jks", readResource("trst.jks"));
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+    try {
       PropertyConfigurator.configure(
           Thread.currentThread().getContextClassLoader().getResource(
               "logging.properties"));
@@ -285,6 +290,69 @@ public class AS4Utils {
     } catch (Throwable th) {
       throw new RuntimeException(th);
     }
+  }
+
+  public static void init(String c2alias, String c2Password, String c3alias, String c3Password,
+                          String trustAlias, String trustPassword,
+                          byte[] c2jks, byte[] c3jks, byte[] trustJks) {
+    Properties c2Properties = createProperty(c2alias, c2Password);
+    Properties c3Properties = createProperty(c3alias, c3Password);
+    Properties trustProperties = createProperty(trustAlias, trustPassword);
+
+    try {
+      PropertyConfigurator.configure(
+          Thread.currentThread().getContextClassLoader().getResource(
+              "logging.properties"));
+    } catch (Exception ex) {
+      ex.printStackTrace();
+    }
+
+    setKeyStoreBytes(c2alias, c2jks);
+    setKeyStoreBytes(c3alias, c3jks);
+    setKeyStoreBytes(trustAlias, trustJks);
+
+    init(c2Properties, c3Properties, trustProperties);
+  }
+
+  public static void init(Properties c2, Properties c3, Properties trust) {
+    try {
+      PropertyConfigurator.configure(
+          Thread.currentThread().getContextClassLoader().getResource(
+              "logging.properties"));
+    } catch (Exception ex) {
+      ex.printStackTrace();
+    }
+    try {
+      WSSConfig.init();
+      c2Crypto = CryptoFactory.getInstance(c2);
+      c3Crypto = CryptoFactory.getInstance(c3);
+      trustCrypto = CryptoFactory.getInstance(trust);
+    } catch (Throwable th) {
+      throw new RuntimeException(th);
+    }
+  }
+
+  public static byte[] readResource(String s) throws IOException {
+    InputStream is = AS4Utils.class.getResourceAsStream(s);
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    byte[] bytes = new byte[1024];
+
+    int read = -1;
+
+    while ((read = is.read(bytes)) != -1) {
+      baos.write(bytes, 0, read);
+    }
+
+    return baos.toByteArray();
+  }
+
+  public static void setKeyStoreBytes(String name, byte[] bytes) {
+    keyStoreBytes.put(name, bytes);
+  }
+
+  static InputStream getResource(String name) {
+    final byte[] buf = keyStoreBytes.get(name);
+    return new ByteArrayInputStream(buf);
   }
 
   //region Extract Attachments
@@ -370,9 +438,9 @@ public class AS4Utils {
 
   /**
    * Encrypts and Signs the soap message together with the attachments.
-   * <p/>
+   * <p>
    * Strips out the ws:security header if any.
-   * <p/>
+   * <p>
    * Assumes that the attachments are already decrypted.
    *
    * @param message
@@ -480,9 +548,9 @@ public class AS4Utils {
 
   /**
    * Signs the soap message (no encrpytion)
-   * <p/>
+   * <p>
    * Strips out the ws:security header if any.
-   * <p/>
+   * <p>
    * Assumes that the attachments are already decrypted.
    *
    * @param message
@@ -577,9 +645,9 @@ public class AS4Utils {
 
   /**
    * Signs then encrypts soap message together with the attachments.
-   * <p/>
+   * <p>
    * Strips out the ws:security header if any.
-   * <p/>
+   * <p>
    * Assumes that the attachments are already decrypted.
    *
    * @param message
@@ -917,104 +985,22 @@ public class AS4Utils {
     }
   }
 
-  /**
-   * @return a default ebms messaging object with default values.
-   */
-  public static Messaging createDefaultMessagingObject(String from, String to, String service, String action,
-                                                       Map<String, byte[]> payloads) {
-    Messaging messaging = new Messaging();
-    UserMessage userMessage = new UserMessage();
+  private static Properties createProperty(String alias, String password) {
+    String propertyString = "org.apache.wss4j.crypto.provider=minder.as4Utils.Merlin\n" +
+        "org.apache.wss4j.crypto.merlin.keystore.type=jks\n" +
+        "org.apache.wss4j.crypto.merlin.keystore.password=" + password + "\n" +
+        "org.apache.wss4j.crypto.merlin.keystore.alias=" + alias + "\n" +
+        "org.apache.wss4j.crypto.merlin.keystore.file=" + alias + "\n";
 
-    //PARTY INFO
-    PartyInfo partyInfo = createPartyInfo(from, to, "http://www.domibus.eu/exampleType");
-    userMessage.setPartyInfo(partyInfo);
-    //COLLOBORATION INFO
-    CollaborationInfo ci = new CollaborationInfo();
-    Service serv = new Service();
-    serv.setType("exampleService");
-
-    serv.setValue(service);
-
-    ci.setService(serv);
-    ci.setAction(action);
-    userMessage.setCollaborationInfo(ci);
-
-    MessageProperties messageProperties = new MessageProperties();
-    messageProperties.getProperty().add(createProperty("originalSender", "Corner1"));
-    messageProperties.getProperty().add(createProperty("finalRecipient", "Corner4"));
-    userMessage.setMessageProperties(messageProperties);
-
-    PayloadInfo payloadInfo = new PayloadInfo();
-
-    for (Map.Entry<String, byte[]> entry : payloads.entrySet()) {
-      String key = entry.getKey();
-      if (!key.equals("bodyLoad")) {
-        String[] split = key.split("\\|");
-        String id = split[0];
-        String mimeType = split[1];
-        Property property = createProperty("MimeType", mimeType);
-        PartInfo partInfo = createPartInfo(id, "minder specific thingy", property);
-        payloadInfo.getPartInfo().add(partInfo);
-      }
+    Properties properties = new Properties();
+    try {
+      properties.load(new ByteArrayInputStream(propertyString.getBytes()));
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
-
-    if (payloads.containsKey("bodyLoad")) {
-      Property property = createProperty("MimeType", "text/xml");
-      PartInfo partInfo = createPartInfo(null, "body load", property);
-      payloadInfo.getPartInfo().add(partInfo);
-    }
-    userMessage.setPayloadInfo(payloadInfo);
-    messaging.setUserMessage(userMessage);
-
-    return messaging;
+    return properties;
   }
 
-  //creator functions
-  public static PartyInfo createPartyInfo(String fromParty, String toParty, String type) {
-    PartyInfo partyInfo = new PartyInfo();
-    //from
-    {
-      From from = new From();
-      PartyId partyId = new PartyId();
-      partyId.setType(type);
-      partyId.setValue(fromParty);
-      from.getPartyId().add(partyId);
-      from.setRole("GW");
-      partyInfo.setFrom(from);
-    }
-    //to
-    {
-      To to = new To();
-      PartyId partyId = new PartyId();
-      partyId.setType(type);
-      partyId.setValue(toParty);
-      to.getPartyId().add(partyId);
-      to.setRole("GW");
-      partyInfo.setTo(to);
-    }
-    return partyInfo;
-  }
 
-  public static Property createProperty(String name, String value) {
-    Property property = new Property();
-    property.setName(name);
-    property.setValue(value);
-    return property;
-  }
-
-  public static PartInfo createPartInfo(String href, String description, Property... properties) {
-    PartInfo partInfo = new PartInfo();
-    partInfo.setHref(href);
-    Description desc = new Description();
-    desc.setValue(description);
-    desc.setLang("en-US");
-    partInfo.setDescription(desc);
-    PartProperties partProperties = new PartProperties();
-    for (Property property : properties) {
-      partProperties.getProperty().add(property);
-    }
-    partInfo.setPartProperties(partProperties);
-    return partInfo;
-  }
 }
 

@@ -15,6 +15,7 @@ import static minder.as4Utils.AS4Utils.*;
 import javax.xml.soap.SOAPMessage;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.Base64;
 import java.util.List;
 
@@ -28,7 +29,14 @@ public class Test {
   @BeforeClass
   public static void init() throws WSSecurityException {
     PropertyConfigurator.configure("logging.properties");
-    AS4Utils.init();
+
+
+    try {
+      AS4Utils.init("testGateway1", "123456", "testGateway2", "123456", "trust", "123456",
+          AS4Utils.readResource("/c2.jks"), AS4Utils.readResource("/c3.jks"), AS4Utils.readResource("/trst.jks"));
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   @org.junit.Test

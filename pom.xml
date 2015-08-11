@@ -6,7 +6,7 @@
 
     <groupId>minder</groupId>
     <artifactId>AS4Utils</artifactId>
-    <version>1.0.4</version>
+    <version>1.1.0</version>
 
     <build>
         <plugins>
@@ -85,7 +85,5 @@
             <id>snapshots</id>
             <url>http://eidrepo:8081/nexus/content/repositories/snapshots</url>
         </snapshotRepository>
-
-
     </distributionManagement>
 </project>
