@@ -176,7 +176,7 @@ public class Test {
     SOAPMessage plain1 = verifyAndDecrypt(message1, Corner.CORNER_3);
     System.out.println(describe(plain1));
 
-    SOAPMessage packed = encryptAndSign(plain1, Corner.CORNER_3);
+    SOAPMessage packed = signAndEncrypt(plain1, Corner.CORNER_3);
     System.out.println(describe(packed));
 
     writeFile("/Users/yerlibilgin/Desktop/1.xml", prettyPrint(packed.getSOAPHeader().getFirstChild()));
@@ -184,7 +184,7 @@ public class Test {
     SOAPMessage plain2 = verifyAndDecrypt(packed, Corner.CORNER_2);
     System.out.println(describe(plain2));
 
-    SOAPMessage packed2 = encryptAndSign(plain2, Corner.CORNER_2);
+    SOAPMessage packed2 = signAndEncrypt(plain2, Corner.CORNER_2);
     System.out.println(describe(packed2));
 
     writeFile("/Users/yerlibilgin/Desktop/2.xml", prettyPrint(packed2.getSOAPHeader().getFirstChild()));

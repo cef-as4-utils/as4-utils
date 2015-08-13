@@ -15,9 +15,7 @@ import org.apache.wss4j.dom.handler.WSHandlerResult;
 import org.apache.wss4j.dom.message.WSSecEncrypt;
 import org.apache.wss4j.dom.message.WSSecHeader;
 import org.apache.wss4j.dom.message.WSSecSignature;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
+import org.w3c.dom.*;
 
 import javax.security.auth.callback.CallbackHandler;
 import javax.xml.namespace.NamespaceContext;
@@ -43,6 +41,12 @@ import java.util.zip.GZIPOutputStream;
  * Created by yerlibilgin on 13/05/15.
  */
 public class AS4Utils {
+  public static final String signatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+  public static final int encKeyIdentifierType = WSConstants.SKI_KEY_IDENTIFIER;
+  public static final String symmetricEncAlgorithm = WSConstants.AES_128_GCM;
+  public static final int signKeyIdentifierType = WSConstants.BST_DIRECT_REFERENCE;
+  public static final String digestAlgorithm = WSConstants.SHA256;
+
   static MessageFactory messageFactory = null;
   static SOAPConnectionFactory soapConnectionFactory = null;
 
@@ -263,6 +267,11 @@ public class AS4Utils {
   private static Crypto c3Crypto = null;
   private static Crypto trustCrypto = null;
 
+  private static String USER_C2 = "testGateway1";
+  private static String USER_C3 = "testGateway2";
+  private static String PWD_C2 = "123456";
+  private static String PWD_C3 = "123456";
+
   public static void init() {
     init("c2.properties", "c3.properties", "trust.properties");
   }
@@ -310,6 +319,11 @@ public class AS4Utils {
     setKeyStoreBytes(c2alias, c2jks);
     setKeyStoreBytes(c3alias, c3jks);
     setKeyStoreBytes(trustAlias, trustJks);
+
+    USER_C2 = c2alias;
+    USER_C3 = c3alias;
+    PWD_C2 = c2Password;
+    PWD_C3 = c3Password;
 
     init(c2Properties, c3Properties, trustProperties);
   }
@@ -458,10 +472,10 @@ public class AS4Utils {
 
       WSSecEncrypt encrypt = new WSSecEncrypt();
       //if C2 is sending, then enrypt with C3 certificate.
-      encrypt.setUserInfo(sender == Corner.CORNER_2 ? "testGateway2" : "testGateway1", "123456");
+      encrypt.setUserInfo(sender == Corner.CORNER_2 ? USER_C3 : USER_C2, sender == Corner.CORNER_2 ? PWD_C3 : PWD_C2);
       encrypt.getParts().add(new WSEncryptionPart("cid:Attachments", "Element"));
-      encrypt.setKeyIdentifierType(WSConstants.SKI_KEY_IDENTIFIER);
-      encrypt.setSymmetricEncAlgorithm(WSConstants.AES_128_GCM);
+      encrypt.setKeyIdentifierType(encKeyIdentifierType);
+      encrypt.setSymmetricEncAlgorithm(symmetricEncAlgorithm);
 
       final List<Attachment> attachments = new ArrayList<>();
       message.getAttachments().forEachRemaining(new Consumer<AttachmentPart>() {
@@ -493,13 +507,13 @@ public class AS4Utils {
 
       WSSecSignature signature = new WSSecSignature();
       //if C2 is sending, then sign with C2 key.
-      signature.setUserInfo(sender == Corner.CORNER_2 ? "testGateway1" : "testGateway2", "123456");
+      signature.setUserInfo(sender == Corner.CORNER_2 ? USER_C2 : USER_C3, sender == Corner.CORNER_2 ? PWD_C2 : PWD_C3);
       signature.getParts().add(new WSEncryptionPart("Messaging", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/", "Content"));
       signature.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Element"));
       signature.getParts().add(new WSEncryptionPart("cid:Attachments", "Content"));
-      signature.setDigestAlgo(WSConstants.SHA256);
-      signature.setSignatureAlgorithm("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
-      signature.setKeyIdentifierType(WSConstants.BST_DIRECT_REFERENCE);
+      signature.setDigestAlgo(digestAlgorithm);
+      signature.setSignatureAlgorithm(signatureAlgorithm);
+      signature.setKeyIdentifierType(signKeyIdentifierType);
 
       List<Attachment> encryptedAttachments = attachmentCallbackHandler.getResponseAttachments();
       attachmentCallbackHandler = new AttachmentCallbackHandler(encryptedAttachments);
@@ -591,13 +605,13 @@ public class AS4Utils {
 
       WSSecSignature signature = new WSSecSignature();
       //if C2 is sending, then sign with C2 key.
-      signature.setUserInfo(sender == Corner.CORNER_2 ? "testGateway1" : "testGateway2", "123456");
+      signature.setUserInfo(sender == Corner.CORNER_2 ? USER_C2 : USER_C3, sender == Corner.CORNER_2 ? PWD_C2 : PWD_C3);
       signature.getParts().add(new WSEncryptionPart("Messaging", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/", "Content"));
       signature.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Element"));
       signature.getParts().add(new WSEncryptionPart("cid:Attachments", "Content"));
-      signature.setDigestAlgo(WSConstants.SHA256);
-      signature.setSignatureAlgorithm("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
-      signature.setKeyIdentifierType(WSConstants.BST_DIRECT_REFERENCE);
+      signature.setDigestAlgo(digestAlgorithm);
+      signature.setSignatureAlgorithm(signatureAlgorithm);
+      signature.setKeyIdentifierType(signKeyIdentifierType);
 
       AttachmentCallbackHandler attachmentCallbackHandler = new AttachmentCallbackHandler(attachments);
       signature.setAttachmentCallbackHandler(attachmentCallbackHandler);
@@ -665,13 +679,13 @@ public class AS4Utils {
 
       WSSecSignature signature = new WSSecSignature();
       //if C2 is sending, then sign with C2 key.
-      signature.setUserInfo(sender == Corner.CORNER_2 ? "testGateway1" : "testGateway2", "123456");
+      signature.setUserInfo(sender == Corner.CORNER_2 ? USER_C2 : USER_C3, sender == Corner.CORNER_2 ? PWD_C2 : PWD_C3);
       signature.getParts().add(new WSEncryptionPart("Messaging", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/", "Content"));
       signature.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Element"));
 
-      signature.setDigestAlgo(WSConstants.SHA256);
-      signature.setSignatureAlgorithm("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
-      signature.setKeyIdentifierType(WSConstants.BST_DIRECT_REFERENCE);
+      signature.setDigestAlgo(digestAlgorithm);
+      signature.setSignatureAlgorithm(signatureAlgorithm);
+      signature.setKeyIdentifierType(signKeyIdentifierType);
 
 
       AttachmentCallbackHandler attachmentCallbackHandler = null;
@@ -714,9 +728,9 @@ public class AS4Utils {
 
       WSSecEncrypt encrypt = new WSSecEncrypt();
       //if C2 is sending, then enrypt with C3 certificate.
-      encrypt.setUserInfo(sender == Corner.CORNER_2 ? "testGateway2" : "testGateway1", "123456");
-      encrypt.setKeyIdentifierType(WSConstants.SKI_KEY_IDENTIFIER);
-      encrypt.setSymmetricEncAlgorithm(WSConstants.AES_128_GCM);
+      encrypt.setUserInfo(sender == Corner.CORNER_2 ? USER_C3 : USER_C2, sender == Corner.CORNER_2 ? PWD_C3 : PWD_C2);
+      encrypt.setKeyIdentifierType(encKeyIdentifierType);
+      encrypt.setSymmetricEncAlgorithm(symmetricEncAlgorithm);
 
       if (attachmentCount > 0) {
         encrypt.getParts().add(new WSEncryptionPart("cid:Attachments", "Element"));
