@@ -2,9 +2,11 @@ package minder.as4Utils;
 
 import org.apache.log4j.PropertyConfigurator;
 import org.apache.wss4j.common.WSEncryptionPart;
+import org.apache.wss4j.common.bsp.BSPRule;
 import org.apache.wss4j.common.crypto.Crypto;
 import org.apache.wss4j.common.crypto.CryptoFactory;
 import org.apache.wss4j.common.ext.Attachment;
+import org.apache.wss4j.common.ext.WSSecurityException;
 import org.apache.wss4j.common.util.AttachmentUtils;
 import org.apache.wss4j.common.util.XMLUtils;
 import org.apache.wss4j.dom.WSConstants;
@@ -15,8 +17,10 @@ import org.apache.wss4j.dom.handler.WSHandlerResult;
 import org.apache.wss4j.dom.message.WSSecEncrypt;
 import org.apache.wss4j.dom.message.WSSecHeader;
 import org.apache.wss4j.dom.message.WSSecSignature;
-import org.w3c.dom.*;
+import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
 
+import javax.net.ssl.*;
 import javax.security.auth.callback.CallbackHandler;
 import javax.xml.namespace.NamespaceContext;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -32,6 +36,9 @@ import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.io.*;
 import java.net.URL;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.zip.GZIPInputStream;
@@ -40,17 +47,17 @@ import java.util.zip.GZIPOutputStream;
 /**
  * Created by yerlibilgin on 13/05/15.
  */
-public class AS4Utils {
-  public static final String signatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
-  public static final int encKeyIdentifierType = WSConstants.SKI_KEY_IDENTIFIER;
-  public static final String symmetricEncAlgorithm = WSConstants.AES_128_GCM;
-  public static final int signKeyIdentifierType = WSConstants.BST_DIRECT_REFERENCE;
-  public static final String digestAlgorithm = WSConstants.SHA256;
+public class SWA12Util {
+  public static String signatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+  public static int encKeyIdentifierType = WSConstants.SKI_KEY_IDENTIFIER;
+  public static String symmetricEncAlgorithm = WSConstants.AES_128_GCM;
+  public static int signKeyIdentifierType = WSConstants.BST_DIRECT_REFERENCE;
+  public static String digestAlgorithm = WSConstants.SHA256;
 
   static MessageFactory messageFactory = null;
   static SOAPConnectionFactory soapConnectionFactory = null;
 
-  private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(AS4Utils.class);
+  private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(SWA12Util.class);
   private static HashMap<String, byte[]> keyStoreBytes = new HashMap<>();
 
 
@@ -105,29 +112,36 @@ public class AS4Utils {
    * @return
    */
   public static byte[] serializeSOAPMessage(MimeHeaders headers, SOAPMessage message) {
-    LinkedHashMap<String, String[]> headerMap = new LinkedHashMap<>();
-    Iterator iterator = headers.getAllHeaders();
+    LinkedHashMap<String, String> headerMap = new LinkedHashMap<>();
+
+
+    byte[] array = writeMessageToByeArray(message);
+
+    Iterator iterator = message.getMimeHeaders().getAllHeaders();
 
     while (iterator.hasNext()) {
       MimeHeader header = (MimeHeader) iterator.next();
-
-      String[] values = headers.getHeader(header.getName());
-      headerMap.put(header.getName(), values);
+      headerMap.put(header.getName(), header.getValue());
     }
+
+    Object[] toSerialize = new Object[]{headerMap, array};
 
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    try {
-      message.writeTo(baos);
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
-    Object[] toSerialize = new Object[]{headerMap, baos.toByteArray()};
-
-    baos = new ByteArrayOutputStream();
     try {
       ObjectOutputStream oos = new ObjectOutputStream(baos);
       oos.writeObject(toSerialize);
       oos.close();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+
+    return baos.toByteArray();
+  }
+
+  public static byte[] writeMessageToByeArray(SOAPMessage message) {
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    try {
+      message.writeTo(baos);
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -154,17 +168,20 @@ public class AS4Utils {
       ObjectInputStream ois = new ObjectInputStream(is);
       Object[] objects = (Object[]) ois.readObject();
 
-      HashMap<String, String[]> hashMap = (HashMap<String, String[]>) objects[0];
-      MimeHeaders headers = new MimeHeaders();
-      for (String name : hashMap.keySet()) {
-        //first item is key, second is value
-        for (String value : hashMap.get(name)) {
-          headers.addHeader(name, value);
-        }
-      }
+      HashMap<String, String> hashMap = (HashMap<String, String>) objects[0];
 
       //object[1] has been created by the writeTo method of SOAPMessage, so do the inverse.
-      return messageFactory.createMessage(headers, new ByteArrayInputStream((byte[]) objects[1]));
+      final byte[] array = (byte[]) objects[1];
+
+      MimeHeaders headers = null;
+      if (hashMap.size() > 0) {
+        headers = new MimeHeaders();
+        for (String name : hashMap.keySet()) {
+          //first item is key, second is value
+          headers.addHeader(name, hashMap.get(name));
+        }
+      }
+      return readFromByteArray(headers, array);
     } catch (Exception e) {
       LOG.error(e.getMessage(), e);
       throw new RuntimeException(e);
@@ -174,6 +191,10 @@ public class AS4Utils {
       } catch (Exception ex) {
       }
     }
+  }
+
+  public static SOAPMessage readFromByteArray(MimeHeaders headers, byte[] array) throws IOException, SOAPException {
+    return messageFactory.createMessage(headers, new ByteArrayInputStream(array));
   }
 
   /**
@@ -347,7 +368,7 @@ public class AS4Utils {
   }
 
   public static byte[] readResource(String s) throws IOException {
-    InputStream is = AS4Utils.class.getResourceAsStream(s);
+    InputStream is = SWA12Util.class.getResourceAsStream(s);
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
     byte[] bytes = new byte[1024];
 
@@ -366,72 +387,30 @@ public class AS4Utils {
 
   static InputStream getResource(String name) {
     final byte[] buf = keyStoreBytes.get(name);
+    System.out.println(name);
     return new ByteArrayInputStream(buf);
   }
 
   //region Extract Attachments
   public static SOAPMessage verifyAndDecrypt(SOAPMessage message, Corner receiver) throws Exception {
-    message.saveChanges();
     SOAPMessage newMessage = deserializeSOAPMessage(serializeSOAPMessage(message.getMimeHeaders(), message));
+
+    final List<Attachment> attachments = parts2att(message);
+
+    AttachmentCallbackHandler attachmentCallbackHandler = new AttachmentCallbackHandler(attachments);
+    verify(newMessage.getSOAPPart(), attachmentCallbackHandler, receiver);
+
     newMessage.removeAllAttachments();
+    final List<Attachment> responseAttachments = attachmentCallbackHandler.getResponseAttachments();
 
-    stripWSSEC(newMessage.getSOAPHeader());
+    consumeResponseAttachments(newMessage, responseAttachments);
 
-    List<Attachment> encryptedAttachments = new ArrayList<>();
-    message.getAttachments().forEachRemaining(new Consumer<AttachmentPart>() {
-      @Override
-      public void accept(AttachmentPart o) {
-        final Attachment at = new Attachment();
-        o.getAllMimeHeaders().forEachRemaining(new Consumer<MimeHeader>() {
-          @Override
-          public void accept(MimeHeader mimeHeader) {
-            at.addHeader(mimeHeader.getName(), mimeHeader.getValue());
-          }
-        });
-
-        at.setMimeType(o.getContentType());
-        at.setId(o.getContentId().replaceAll(">|<", ""));
-        try {
-          at.setSourceStream(new ByteArrayInputStream(o.getRawContentBytes()));
-        } catch (SOAPException e) {
-          e.printStackTrace();
-        }
-        encryptedAttachments.add(at);
-      }
-    });
-
-    AttachmentCallbackHandler attachmentCallbackHandler = new AttachmentCallbackHandler(encryptedAttachments);
-    verify(message.getSOAPPart(), attachmentCallbackHandler, receiver);
-
-    for (Attachment at : attachmentCallbackHandler.getResponseAttachments()) {
-      InputStream is = at.getSourceStream();
-      if (is.available() <= 0)
-        continue;
-
-      AttachmentPart ap = newMessage.createAttachmentPart();
-      Map<String, String> headers = at.getHeaders();
-      for (String key : headers.keySet()) {
-        ap.addMimeHeader(key, headers.get(key));
-      }
-
-      ap.setContentId(at.getId());
-      ap.setContentType(at.getMimeType());
-
-      int r = 0;
-      ByteArrayOutputStream baos = new ByteArrayOutputStream();
-      while ((r = is.read()) != -1) {
-        baos.write(r);
-      }
-
-      byte[] val = baos.toByteArray();
-      ap.setRawContentBytes(val, 0, val.length, at.getMimeType());
-      newMessage.addAttachmentPart(ap);
-    }
-
+    WSSecHeader header = new WSSecHeader();
+    header.removeSecurityHeader(newMessage.getSOAPPart());
     newMessage.saveChanges();
+
     return newMessage;
   }
-
 
   /**
    * Verifies the soap envelope.
@@ -441,6 +420,10 @@ public class AS4Utils {
    */
   private static WSHandlerResult verify(Document doc, CallbackHandler attachmentCallbackHandler, Corner receiver) throws Exception {
     RequestData requestData = new RequestData();
+    List<BSPRule> bspRules = new ArrayList<>();
+    bspRules.add(BSPRule.R5621);
+    bspRules.add(BSPRule.R5620);
+    requestData.setIgnoredBSPRules(bspRules);
     requestData.setAttachmentCallbackHandler(attachmentCallbackHandler);
     requestData.setSigVerCrypto(trustCrypto);
     requestData.setDecCrypto(receiver == Corner.CORNER_2 ? c2Crypto : c3Crypto);
@@ -448,123 +431,11 @@ public class AS4Utils {
     return secEngine.processSecurityHeader(doc, requestData);
   }
 
-  //endregion
-
-  /**
-   * Encrypts and Signs the soap message together with the attachments.
-   * <p>
-   * Strips out the ws:security header if any.
-   * <p>
-   * Assumes that the attachments are already decrypted.
-   *
-   * @param message
-   */
-  public static SOAPMessage encryptAndSign(SOAPMessage message, Corner sender) {
-    try {
-      message.saveChanges();
-      SOAPMessage newMessage = deserializeSOAPMessage(serializeSOAPMessage(message.getMimeHeaders(), message));
-      newMessage.removeAllAttachments();
-      stripWSSEC(newMessage.getSOAPHeader());
-      Document doc = newMessage.getSOAPPart();
-
-      WSSecHeader secHeader = new WSSecHeader();
-      secHeader.insertSecurityHeader(doc);
-
-      WSSecEncrypt encrypt = new WSSecEncrypt();
-      //if C2 is sending, then enrypt with C3 certificate.
-      encrypt.setUserInfo(sender == Corner.CORNER_2 ? USER_C3 : USER_C2, sender == Corner.CORNER_2 ? PWD_C3 : PWD_C2);
-      encrypt.getParts().add(new WSEncryptionPart("cid:Attachments", "Element"));
-      encrypt.setKeyIdentifierType(encKeyIdentifierType);
-      encrypt.setSymmetricEncAlgorithm(symmetricEncAlgorithm);
-
-      final List<Attachment> attachments = new ArrayList<>();
-      message.getAttachments().forEachRemaining(new Consumer<AttachmentPart>() {
-        @Override
-        public void accept(final AttachmentPart o) {
-          final Attachment attachment = new Attachment();
-          attachment.setMimeType(o.getContentType());
-          o.getAllMimeHeaders().forEachRemaining(new Consumer<MimeHeader>() {
-            @Override
-            public void accept(MimeHeader mime) {
-              attachment.addHeader(mime.getName(), mime.getValue());
-            }
-          });
-          attachment.setId(o.getContentId());
-          try {
-            attachment.setSourceStream(new ByteArrayInputStream(o.getRawContentBytes()));
-          } catch (SOAPException e) {
-            throw new RuntimeException(e);
-          }
-
-          attachments.add(attachment);
-        }
-      });
-
-      AttachmentCallbackHandler attachmentCallbackHandler = new AttachmentCallbackHandler(attachments);
-      encrypt.setAttachmentCallbackHandler(attachmentCallbackHandler);
-      //if C2 is sending, then enrypt with C3 certificate.
-      doc = encrypt.build(doc, sender == Corner.CORNER_2 ? c3Crypto : c2Crypto, secHeader);
-
-      WSSecSignature signature = new WSSecSignature();
-      //if C2 is sending, then sign with C2 key.
-      signature.setUserInfo(sender == Corner.CORNER_2 ? USER_C2 : USER_C3, sender == Corner.CORNER_2 ? PWD_C2 : PWD_C3);
-      signature.getParts().add(new WSEncryptionPart("Messaging", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/", "Content"));
-      signature.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Element"));
-      signature.getParts().add(new WSEncryptionPart("cid:Attachments", "Content"));
-      signature.setDigestAlgo(digestAlgorithm);
-      signature.setSignatureAlgorithm(signatureAlgorithm);
-      signature.setKeyIdentifierType(signKeyIdentifierType);
-
-      List<Attachment> encryptedAttachments = attachmentCallbackHandler.getResponseAttachments();
-      attachmentCallbackHandler = new AttachmentCallbackHandler(encryptedAttachments);
-      signature.setAttachmentCallbackHandler(attachmentCallbackHandler);
-
-      //if C2 is sending, then sign with C2 key.
-      doc = signature.build(doc, sender == Corner.CORNER_2 ? c2Crypto : c3Crypto, secHeader);
-      if (LOG.isDebugEnabled()) {
-        String outputString = XMLUtils.PrettyDocumentToString(doc);
-        LOG.debug(outputString);
-      }
-
-      for (Attachment at : attachmentCallbackHandler.getResponseAttachments()) {
-        System.out.println("ATID " + at.getId());
-        InputStream is = at.getSourceStream();
-        if (is.available() <= 0)
-          continue;
-
-        AttachmentPart ap = newMessage.createAttachmentPart();
-        Map<String, String> headers = at.getHeaders();
-        for (String key : headers.keySet()) {
-          ap.addMimeHeader(key, headers.get(key));
-        }
-
-        ap.setContentId(at.getId());
-        ap.setContentType(at.getMimeType());
-
-        int r = 0;
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        while ((r = is.read()) != -1) {
-          baos.write(r);
-        }
-
-        byte[] val = baos.toByteArray();
-        ap.setRawContentBytes(val, 0, val.length, at.getMimeType());
-        newMessage.addAttachmentPart(ap);
-      }
-
-      newMessage.saveChanges();
-      return newMessage;
-    } catch (Throwable e) {
-      throw new RuntimeException(e);
-    }
-  }
-
-
   /**
    * Signs the soap message (no encrpytion)
-   * <p>
+   * <p/>
    * Strips out the ws:security header if any.
-   * <p>
+   * <p/>
    * Assumes that the attachments are already decrypted.
    *
    * @param message
@@ -574,34 +445,13 @@ public class AS4Utils {
       message.saveChanges();
       SOAPMessage newMessage = deserializeSOAPMessage(serializeSOAPMessage(message.getMimeHeaders(), message));
       newMessage.removeAllAttachments();
-      stripWSSEC(newMessage.getSOAPHeader());
+      stripWSSEC(newMessage.getSOAPPart());
       Document doc = newMessage.getSOAPPart();
 
       WSSecHeader secHeader = new WSSecHeader();
       secHeader.insertSecurityHeader(doc);
 
-      final List<Attachment> attachments = new ArrayList<>();
-      message.getAttachments().forEachRemaining(new Consumer<AttachmentPart>() {
-        @Override
-        public void accept(final AttachmentPart o) {
-          final Attachment attachment = new Attachment();
-          attachment.setMimeType(o.getContentType());
-          o.getAllMimeHeaders().forEachRemaining(new Consumer<MimeHeader>() {
-            @Override
-            public void accept(MimeHeader mime) {
-              attachment.addHeader(mime.getName(), mime.getValue());
-            }
-          });
-          attachment.setId(o.getContentId());
-          try {
-            attachment.setSourceStream(new ByteArrayInputStream(o.getRawContentBytes()));
-          } catch (SOAPException e) {
-            throw new RuntimeException(e);
-          }
-
-          attachments.add(attachment);
-        }
-      });
+      final List<Attachment> attachments = parts2att(message);
 
       WSSecSignature signature = new WSSecSignature();
       //if C2 is sending, then sign with C2 key.
@@ -623,31 +473,7 @@ public class AS4Utils {
         LOG.debug(outputString);
       }
 
-      for (Attachment at : attachmentCallbackHandler.getResponseAttachments()) {
-        System.out.println("ATID " + at.getId());
-        InputStream is = at.getSourceStream();
-        if (is.available() <= 0)
-          continue;
-
-        AttachmentPart ap = newMessage.createAttachmentPart();
-        Map<String, String> headers = at.getHeaders();
-        for (String key : headers.keySet()) {
-          ap.addMimeHeader(key, headers.get(key));
-        }
-
-        ap.setContentId(at.getId());
-        ap.setContentType(at.getMimeType());
-
-        int r = 0;
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        while ((r = is.read()) != -1) {
-          baos.write(r);
-        }
-
-        byte[] val = baos.toByteArray();
-        ap.setRawContentBytes(val, 0, val.length, at.getMimeType());
-        newMessage.addAttachmentPart(ap);
-      }
+      consumeResponseAttachments(newMessage, attachmentCallbackHandler.getResponseAttachments());
 
       newMessage.saveChanges();
       return newMessage;
@@ -659,22 +485,20 @@ public class AS4Utils {
 
   /**
    * Signs then encrypts soap message together with the attachments.
-   * <p>
+   * <p/>
    * Strips out the ws:security header if any.
-   * <p>
+   * <p/>
    * Assumes that the attachments are already decrypted.
    *
    * @param message
    */
   public static SOAPMessage signAndEncrypt(SOAPMessage message, Corner sender) {
     try {
-      message.saveChanges();
       SOAPMessage newMessage = deserializeSOAPMessage(serializeSOAPMessage(message.getMimeHeaders(), message));
-      newMessage.removeAllAttachments();
-      stripWSSEC(newMessage.getSOAPHeader());
       Document doc = newMessage.getSOAPPart();
 
       WSSecHeader secHeader = new WSSecHeader();
+      secHeader.removeSecurityHeader(doc);
       secHeader.insertSecurityHeader(doc);
 
       WSSecSignature signature = new WSSecSignature();
@@ -689,37 +513,16 @@ public class AS4Utils {
 
 
       AttachmentCallbackHandler attachmentCallbackHandler = null;
-      final int attachmentCount = message.countAttachments();
+      final int attachmentCount = newMessage.countAttachments();
       if (attachmentCount > 0) {
         signature.getParts().add(new WSEncryptionPart("cid:Attachments", "Content"));
-        final List<Attachment> attachments = new ArrayList<>();
-        message.getAttachments().forEachRemaining(new Consumer<AttachmentPart>() {
-          @Override
-          public void accept(final AttachmentPart o) {
-            final Attachment attachment = new Attachment();
-            attachment.setMimeType(o.getContentType());
-            o.getAllMimeHeaders().forEachRemaining(new Consumer<MimeHeader>() {
-              @Override
-              public void accept(MimeHeader mime) {
-                attachment.addHeader(mime.getName(), mime.getValue());
-              }
-            });
-            attachment.setId(o.getContentId());
-            try {
-              attachment.setSourceStream(new ByteArrayInputStream(o.getRawContentBytes()));
-            } catch (SOAPException e) {
-              throw new RuntimeException(e);
-            }
-
-            attachments.add(attachment);
-          }
-        });
+        final List<Attachment> attachments = parts2att(newMessage);
         attachmentCallbackHandler = new AttachmentCallbackHandler(attachments);
         signature.setAttachmentCallbackHandler(attachmentCallbackHandler);
       }
 
       //if C2 is sending, then sign with C2 key.
-      doc = signature.build(doc, sender == Corner.CORNER_2 ? c2Crypto : c3Crypto, secHeader);
+      signature.build(doc, sender == Corner.CORNER_2 ? c2Crypto : c3Crypto, secHeader);
       if (LOG.isDebugEnabled()) {
         String outputString = XMLUtils.PrettyDocumentToString(doc);
         LOG.debug(outputString);
@@ -730,6 +533,7 @@ public class AS4Utils {
       //if C2 is sending, then enrypt with C3 certificate.
       encrypt.setUserInfo(sender == Corner.CORNER_2 ? USER_C3 : USER_C2, sender == Corner.CORNER_2 ? PWD_C3 : PWD_C2);
       encrypt.setKeyIdentifierType(encKeyIdentifierType);
+      encrypt.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Content"));
       encrypt.setSymmetricEncAlgorithm(symmetricEncAlgorithm);
 
       if (attachmentCount > 0) {
@@ -741,34 +545,11 @@ public class AS4Utils {
 
 
       //if C2 is sending, then enrypt with C3 certificate.
-      doc = encrypt.build(doc, sender == Corner.CORNER_2 ? c3Crypto : c2Crypto, secHeader);
+      encrypt.build(doc, sender == Corner.CORNER_2 ? c3Crypto : c2Crypto, secHeader);
 
+      newMessage.removeAllAttachments();
       if (attachmentCount > 0) {
-        for (Attachment at : attachmentCallbackHandler.getResponseAttachments()) {
-          System.out.println("ATID " + at.getId());
-          InputStream is = at.getSourceStream();
-          if (is.available() <= 0)
-            continue;
-
-          AttachmentPart ap = newMessage.createAttachmentPart();
-          Map<String, String> headers = at.getHeaders();
-          for (String key : headers.keySet()) {
-            ap.addMimeHeader(key, headers.get(key));
-          }
-
-          ap.setContentId(at.getId());
-          ap.setContentType(at.getMimeType());
-
-          int r = 0;
-          ByteArrayOutputStream baos = new ByteArrayOutputStream();
-          while ((r = is.read()) != -1) {
-            baos.write(r);
-          }
-
-          byte[] val = baos.toByteArray();
-          ap.setRawContentBytes(val, 0, val.length, at.getMimeType());
-          newMessage.addAttachmentPart(ap);
-        }
+        consumeResponseAttachments(newMessage, attachmentCallbackHandler.getResponseAttachments());
       }
       newMessage.saveChanges();
       return newMessage;
@@ -777,21 +558,43 @@ public class AS4Utils {
     }
   }
 
+  private static List<Attachment> parts2att(SOAPMessage message) {
+    final List<Attachment> attachments = new ArrayList<>();
+    message.getAttachments().forEachRemaining(new Consumer<AttachmentPart>() {
+      @Override
+      public void accept(final AttachmentPart o) {
+        final Attachment at = new Attachment();
+        o.getAllMimeHeaders().forEachRemaining(hdr -> {
+              MimeHeader header = (MimeHeader) hdr;
+              at.addHeader(header.getName(), header.getValue());
+            }
+        );
+
+        at.setMimeType(o.getContentType());
+        at.setId(o.getContentId().replaceAll(">|<", ""));
+        try {
+          at.setSourceStream(new ByteArrayInputStream(o.getRawContentBytes()));
+        } catch (SOAPException e) {
+          e.printStackTrace();
+        }
+        attachments.add(at);
+      }
+    });
+    return attachments;
+  }
+
   /**
    * Removes the ws:security element from the given node.
    *
-   * @param element
    * @return
    */
-  public static NodeList stripWSSEC(Element element) {
-    NodeList elements = element.getElementsByTagNameNS("*", "Security");
-
-    for (int i = 0; i < elements.getLength(); ++i) {
-      org.w3c.dom.Element item = (Element) elements.item(i);
-      if (item.getParentNode() != null)
-        item.getParentNode().removeChild(item);
+  public static void stripWSSEC(Document document) {
+    WSSecHeader secHeader = new WSSecHeader();
+    try {
+      secHeader.removeSecurityHeader(document);
+    } catch (WSSecurityException e) {
+      e.printStackTrace();
     }
-    return elements;
   }
 
   //endregion
@@ -899,6 +702,43 @@ public class AS4Utils {
     return xPath;
   }
 
+  private static void disableSslVerification() {
+    try {
+      // Create a trust manager that does not validate certificate chains
+      TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
+        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+          return null;
+        }
+
+        public void checkClientTrusted(X509Certificate[] certs, String authType) {
+        }
+
+        public void checkServerTrusted(X509Certificate[] certs, String authType) {
+        }
+      }
+      };
+
+      // Install the all-trusting trust manager
+      SSLContext sc = SSLContext.getInstance("SSL");
+      sc.init(null, trustAllCerts, new java.security.SecureRandom());
+      HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+
+      // Create all-trusting host name verifier
+      HostnameVerifier allHostsValid = new HostnameVerifier() {
+        public boolean verify(String hostname, SSLSession session) {
+          return true;
+        }
+      };
+
+      // Install the all-trusting host verifier
+      HttpsURLConnection.setDefaultHostnameVerifier(allHostsValid);
+    } catch (NoSuchAlgorithmException e) {
+      e.printStackTrace();
+    } catch (KeyManagementException e) {
+      e.printStackTrace();
+    }
+  }
+
   static class SoapNamespaceContext implements NamespaceContext {
 
     private HashMap<String, String> maps = new HashMap<>();
@@ -940,7 +780,7 @@ public class AS4Utils {
 
     @Override
     public String getPrefix(String namespace) {
-      return null;
+      return maps.get("namespace");
     }
 
     @Override
@@ -951,35 +791,15 @@ public class AS4Utils {
 
   public static String describe(SOAPMessage message) {
     final StringBuilder sb = new StringBuilder();
-    sb.append("______________________________________________________\n");
-    sb.append(prettyPrint(message.getSOAPPart())).append('\n');
-
-    sb.append("-------------------\n\n");
-    message.getAttachments().forEachRemaining(new Consumer<AttachmentPart>() {
-      @Override
-      public void accept(AttachmentPart attachmentPart) {
-        sb.append("Attachment: ").append(attachmentPart.getContentId()).append('\n');
-        attachmentPart.getAllMimeHeaders().forEachRemaining(new Consumer<MimeHeader>() {
-          @Override
-          public void accept(MimeHeader o) {
-            sb.append("\t").append(o.getName()).append(" ---> ").append(o.getValue()).append('\n');
-          }
-        });
-
-        try {
-          sb.append(new String(attachmentPart.getRawContentBytes()));
-        } catch (SOAPException e) {
-          throw new RuntimeException();
-        }
-        sb.append("-------------------\n\n");
-      }
-    });
-    sb.append("______________________________________________________\n");
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
     try {
-      message.saveChanges();
-    } catch (SOAPException e) {
+      message.writeTo(baos);
+
+      sb.append(new String(baos.toByteArray()));
+    } catch (Exception e) {
       e.printStackTrace();
+      sb.append("Error");
     }
 
     return sb.toString();
@@ -999,6 +819,25 @@ public class AS4Utils {
     }
   }
 
+  public static byte[] readBinaryFile(String file) {
+    try {
+      FileInputStream fis = new FileInputStream(file);
+      int len = fis.available();
+      byte[] b = new byte[len];
+      ByteArrayOutputStream baos = new ByteArrayOutputStream();
+      int read = -1;
+
+      while ((read = fis.read(b, 0, b.length)) > 0) {
+        baos.write(b, 0, read);
+      }
+
+      return baos.toByteArray();
+    } catch (Exception ex) {
+      ex.printStackTrace();
+      return null;
+    }
+  }
+
   private static Properties createProperty(String alias, String password) {
     String propertyString = "org.apache.wss4j.crypto.provider=minder.as4Utils.Merlin\n" +
         "org.apache.wss4j.crypto.merlin.keystore.type=jks\n" +
@@ -1015,6 +854,126 @@ public class AS4Utils {
     return properties;
   }
 
+  private static void  consumeResponseAttachments(SOAPMessage newMessage, List<Attachment> responseAttachments) throws IOException, SOAPException {
+    for (Attachment at : responseAttachments) {
+      InputStream is = at.getSourceStream();
+      if (is.available() <= 0)
+        continue;
 
+      AttachmentPart ap = newMessage.createAttachmentPart();
+      Map<String, String> headers = at.getHeaders();
+      for (String key : headers.keySet()) {
+        ap.addMimeHeader(key, headers.get(key));
+      }
+
+      if (ap.getContentId() == null)
+        ap.setContentId("<" + at.getId() + ">");
+
+      if (ap.getContentType() == null)
+        ap.setContentType(at.getMimeType());
+
+      int r = 0;
+      ByteArrayOutputStream baos = new ByteArrayOutputStream();
+      while ((r = is.read()) != -1) {
+        baos.write(r);
+      }
+
+      byte[] val = baos.toByteArray();
+      ap.setRawContentBytes(val, 0, val.length, at.getMimeType());
+      newMessage.addAttachmentPart(ap);
+    }
+  }
+  public static void main(String[] args) throws Exception {
+    disableSslVerification();
+
+    symmetricEncAlgorithm = WSConstants.AES_128_GCM;
+    init("ibmgw", "123456", "ibmgw2", "123456", "trust", "123456", readBinaryFile("certs/ibmgw.jks"),
+        readBinaryFile("certs/ibmgw2.jks"), readBinaryFile("certs/trust.jks"));
+
+
+    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/payload(51).dat"));
+    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/soap_serialized.xml"));
+    SOAPMessage message = deserializeSOAPMessage(new FileInputStream("samples/david.txt"));
+
+    System.out.println(prettyPrint(message.getSOAPPart()));
+
+    HttpSOAPConnection con = new HttpSOAPConnection();
+    //con.call(message, new URL(""));
+    //final String url = "http://localhost:15001/as4Interceptor";
+    final String url = "https://193.140.74.199:15000/as4Interceptor";
+    //final String url = "https://5.153.46.51:29002/AS4";
+
+
+    message = verifyAndDecrypt(message, Corner.CORNER_3);
+
+    System.out.println(describe(message));
+
+    final Object next =
+        message.getAttachments().next();
+
+    AttachmentPart atp = (AttachmentPart) next;
+
+    byte[] myMessage = "Merhaba ben muhammet".getBytes();
+    myMessage = gzip(myMessage);
+    atp.setRawContentBytes(myMessage, 0, myMessage.length, atp.getContentType());
+    replaceAttachments(message, Arrays.asList(atp));
+
+    message = signAndEncrypt(message, Corner.CORNER_2);
+
+    System.out.println(describe(message));
+
+    System.out.println("Send message");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    System.out.println("-----------------------------");
+    message = con.call(message, new URL(url));
+    System.out.println(prettyPrint(message.getSOAPPart()));
+  }
+
+  public static void main2(String[] args) throws Exception {
+    disableSslVerification();
+
+    init("ibmgw", "123456", "ibmgw2", "123456", "trust", "123456", readBinaryFile("certs/ibmgw.jks"),
+        readBinaryFile("certs/ibmgw2.jks"), readBinaryFile("certs/trust.jks"));
+
+
+    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/payload(51).dat"));
+    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/soap_serialized.xml"));
+    //final SOAPMessage message = deserializeSOAPMessage(new FileInputStream("samples/david.txt"));
+    SOAPMessage message = createMessage();
+    final AttachmentPart part = message.createAttachmentPart();
+    final byte[] bytes = "muhammet".getBytes();
+    part.setContentId("basidnanberi");
+    part.setRawContentBytes(bytes, 0, bytes.length, "application/octet-stream");
+    message.addAttachmentPart(part);
+
+    SOAPElement element = message.getSOAPHeader().addChildElement("Messaging", "eb", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/");
+    element.addTextNode("User Message");
+    element = message.getSOAPBody().addChildElement("question");
+    element.addTextNode("What is your name?");
+
+    message.saveChanges();
+
+    System.out.println("Describe plain message");
+    System.out.println(describe(message));
+    System.out.println("==================================================");
+    message = signAndEncrypt(message, Corner.CORNER_2);
+    System.out.println("Describe enc message");
+    System.out.println(describe(message));
+    System.out.println("==================================================");
+
+    message = verifyAndDecrypt(message, Corner.CORNER_3);
+    System.out.println("Describe reopened message");
+    System.out.println(describe(message));
+    System.out.println("==================================================");
+  }
 }
 

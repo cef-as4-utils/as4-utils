@@ -2,3 +2,9 @@ target
 *.class
 *.jar
 *.iml
+samples
+*.ipr
+*.iws
+.idea
+*.iml
+certs

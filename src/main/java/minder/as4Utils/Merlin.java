@@ -21,7 +21,6 @@ package minder.as4Utils;
 
 import org.apache.wss4j.common.crypto.PasswordEncryptor;
 import org.apache.wss4j.common.ext.WSSecurityException;
-import org.apache.wss4j.common.util.Loader;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -233,6 +232,6 @@ public class Merlin extends org.apache.wss4j.common.crypto.Merlin {
    */
   public static InputStream loadInputStream2(ClassLoader loader, String location)
       throws WSSecurityException, IOException {
-    return AS4Utils.getResource(location);
+    return SWA12Util.getResource(location);
   }
 }

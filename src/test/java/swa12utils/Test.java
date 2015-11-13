@@ -6,17 +6,18 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
-import minder.as4Utils.AS4Utils;
+import minder.as4Utils.SWA12Util;
 import minder.as4Utils.Corner;
-import org.w3c.dom.NodeList;
 
-import static minder.as4Utils.AS4Utils.*;
+import static minder.as4Utils.SWA12Util.*;
 
+import javax.xml.bind.DatatypeConverter;
+import javax.xml.soap.MimeHeader;
 import javax.xml.soap.SOAPMessage;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
+import java.net.URL;
 import java.util.Base64;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -32,18 +33,13 @@ public class Test {
 
 
     try {
-      AS4Utils.init("testGateway1", "123456", "testGateway2", "123456", "trust", "123456",
-          AS4Utils.readResource("/c2.jks"), AS4Utils.readResource("/c3.jks"), AS4Utils.readResource("/trst.jks"));
-    } catch (IOException e) {
+      SWA12Util.init("ibmgw", "123456", "ibmgw2", "123456", "trust", "123456", readBinaryFile("certs/ibmgw.jks"),
+          readBinaryFile("certs/ibmgw2.jks"), readBinaryFile("certs/trust.jks"));
+    } catch (Exception e) {
       throw new RuntimeException(e);
     }
   }
 
-  @org.junit.Test
-  public void main() throws ClassNotFoundException {
-    System.out.println(String[].class);
-    Class.forName("[Ljava.lang.String;", false, this.getClass().getClassLoader());
-  }
   @org.junit.Test
   public void base64() {
     System.out.println(new String(Base64.getDecoder().decode("TXVoYW1tZXQgWUlMREla")));
@@ -71,7 +67,10 @@ public class Test {
 
   @org.junit.Test
   public void testXPath() throws Exception {
-    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap_serialized.bin"), true);
+    SOAPMessage message1 = SWA12Util.deserializeSOAPMessage(new FileInputStream("samples/soap.bin"));
+    FileOutputStream fos = new FileOutputStream("samples/soap_serialized.xml");
+    message1.writeTo(fos);
+    fos.close();
     Node node = message1.getSOAPPart();
     System.out.println(prettyPrint(node));
 
@@ -133,18 +132,21 @@ public class Test {
     System.out.println(prettyPrint(crpyto));
     final String algorithm = crpyto.getAttribute("Algorithm");
     System.out.println(algorithm);
-
   }
 
   @org.junit.Test
   public void testSerializeDeserializeSerialize() throws Exception {
-    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap_serialized.bin"), true);
+    System.out.println("EEE");
+    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap.bin"), true);
+    final String[] header = message1.getMimeHeaders().getHeader("content-type");
+    message1.getMimeHeaders().removeAllHeaders();
+    message1.getMimeHeaders().addHeader("content-type", header[0]);
     System.out.println(describe(message1));
     SOAPMessage plain1 = deserializeSOAPMessage(serializeSOAPMessage(message1.getMimeHeaders(), message1));
-    System.out.println(describe(plain1));
-    SOAPMessage plain2 = deserializeSOAPMessage(serializeSOAPMessage(plain1.getMimeHeaders(), plain1));
+    System.out.println(prettyPrint(plain1.getSOAPPart()));
+    SOAPMessage plain2 = deserializeSOAPMessage(serializeSOAPMessage(null, plain1));
     System.out.println(describe(plain2));
-    SOAPMessage plain3 = deserializeSOAPMessage(serializeSOAPMessage(plain2.getMimeHeaders(), plain2));
+    SOAPMessage plain3 = deserializeSOAPMessage(serializeSOAPMessage(null, plain2));
     System.out.println(describe(plain3));
   }
 
@@ -161,14 +163,26 @@ public class Test {
     }
   }
 
+  public void writeBinaryFile(String file, byte[] val) {
+    FileOutputStream fos = null;
+    try {
+      fos = new FileOutputStream(file);
+
+      fos.write(val);
+      fos.close();
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
   @org.junit.Test
   public void testDecryptEncryptDecrypt() throws Exception {
-    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap_serialized.bin"));
+    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/david.txt"));
 
-    Node firstChild = message1.getSOAPHeader().getFirstChild();
-    System.out.println(firstChild.getLocalName());
+    //Node firstChild = message1.getSOAPHeader().getFirstChild();
+    //System.out.println(firstChild.getLocalName());
 
-    firstChild.getAttributes().removeNamedItem("xmlns");
+    //firstChild.getAttributes().removeNamedItem("xmlns");
 
 
     writeFile("/Users/yerlibilgin/Desktop/original.xml", prettyPrint(message1.getSOAPHeader().getFirstChild().getNextSibling()));
@@ -196,12 +210,12 @@ public class Test {
 
   @org.junit.Test
   public void testSignAndVerify() throws Exception {
-    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap_serialized.bin"));
+    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/david.txt"));
 
-    Node firstChild = message1.getSOAPHeader().getFirstChild();
-    System.out.println(firstChild.getLocalName());
+    //  Node firstChild = message1.getSOAPHeader().getLastChild();
+//    System.out.println(firstChild.getLocalName());
 
-    firstChild.getAttributes().removeNamedItem("xmlns");
+    //firstChild.getAttributes().removeNamedItem("xmlns");
 
     writeFile("/Users/yerlibilgin/Desktop/original.xml", prettyPrint(message1.getSOAPHeader().getFirstChild().getNextSibling()));
 

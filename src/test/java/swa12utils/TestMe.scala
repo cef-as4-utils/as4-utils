@@ -1,14 +1,13 @@
 import java.io.ByteArrayInputStream
 import javax.xml.soap.{SOAPConstants, MessageFactory}
-
-import minder.as4Utils.AS4Utils
+import minder.as4Utils.SWA12Util
 import mtdl.MinderTdl
 
 import scala.io.Source
 
 object TestMe extends MinderTdl(Map[String, String](), false) {
 
-  import minder.as4Utils.AS4Utils._
+  import SWA12Util._
 
   import scala.collection.JavaConversions._
 
@@ -18,9 +17,9 @@ object TestMe extends MinderTdl(Map[String, String](), false) {
   def main(input: Array[String]): Unit = {
     val soapStr = Source.fromFile("soap3.xml").mkString.getBytes
 
-    val soapMessage = AS4Utils.createMessage(null, new ByteArrayInputStream(soapStr))
+    val soapMessage = SWA12Util.createMessage(null, new ByteArrayInputStream(soapStr))
 
-    AS4Utils.init()
+    SWA12Util.init()
 
     val str = prettyPrint(soapMessage.getSOAPHeader)
     System.out.println("SOAP HEADER")
