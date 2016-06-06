@@ -1,11 +1,10 @@
 import java.io.ByteArrayInputStream
 import javax.xml.soap.{SOAPConstants, MessageFactory}
 import minder.as4Utils.SWA12Util
-import mtdl.MinderTdl
 
 import scala.io.Source
 
-object TestMe extends MinderTdl(Map[String, String](), false) {
+object TestMe {
 
   import SWA12Util._
 

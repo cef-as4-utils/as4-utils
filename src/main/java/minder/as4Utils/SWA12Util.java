@@ -112,25 +112,20 @@ public class SWA12Util {
    * @return
    */
   public static byte[] serializeSOAPMessage(MimeHeaders headers, SOAPMessage message) {
-    LinkedHashMap<String, String> headerMap = new LinkedHashMap<>();
-
-
-    byte[] array = writeMessageToByeArray(message);
-
-    Iterator iterator = message.getMimeHeaders().getAllHeaders();
-
-    while (iterator.hasNext()) {
-      MimeHeader header = (MimeHeader) iterator.next();
-      headerMap.put(header.getName(), header.getValue());
-    }
-
-    Object[] toSerialize = new Object[]{headerMap, array};
-
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    PrintStream ps = new PrintStream(baos);
+
+    headers.getAllHeaders().forEachRemaining(hdr -> {
+      MimeHeader mh = (MimeHeader) hdr;
+      ps.print(mh.getName());
+      ps.print(": ");
+      ps.println(mh.getValue());
+    });
+    ps.println();
+
+
     try {
-      ObjectOutputStream oos = new ObjectOutputStream(baos);
-      oos.writeObject(toSerialize);
-      oos.close();
+      message.writeTo(ps);
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -165,31 +160,28 @@ public class SWA12Util {
 
   public static SOAPMessage deserializeSOAPMessage(InputStream is, boolean close) {
     try {
-      ObjectInputStream ois = new ObjectInputStream(is);
-      Object[] objects = (Object[]) ois.readObject();
+      BufferedReader br = new BufferedReader(new InputStreamReader(is));
 
-      HashMap<String, String> hashMap = (HashMap<String, String>) objects[0];
+      MimeHeaders headers = new MimeHeaders();
 
-      //object[1] has been created by the writeTo method of SOAPMessage, so do the inverse.
-      final byte[] array = (byte[]) objects[1];
+      String line = null;
 
-      MimeHeaders headers = null;
-      if (hashMap.size() > 0) {
-        headers = new MimeHeaders();
-        for (String name : hashMap.keySet()) {
-          //first item is key, second is value
-          headers.addHeader(name, hashMap.get(name));
-        }
+      while (!(line = br.readLine()).isEmpty()) {
+        int indexOf = line.indexOf(':');
+        headers.addHeader(line.substring(0, indexOf), line.substring(indexOf + 1).trim());
       }
-      return readFromByteArray(headers, array);
+
+
+      return createMessage(headers, is);
     } catch (Exception e) {
       LOG.error(e.getMessage(), e);
       throw new RuntimeException(e);
     } finally {
-      try {
-        is.close();
-      } catch (Exception ex) {
-      }
+      if (close)
+        try {
+          is.close();
+        } catch (Exception ex) {
+        }
     }
   }
 
@@ -433,9 +425,9 @@ public class SWA12Util {
 
   /**
    * Signs the soap message (no encrpytion)
-   * <p/>
+   * <p>
    * Strips out the ws:security header if any.
-   * <p/>
+   * <p>
    * Assumes that the attachments are already decrypted.
    *
    * @param message
@@ -485,9 +477,9 @@ public class SWA12Util {
 
   /**
    * Signs then encrypts soap message together with the attachments.
-   * <p/>
+   * <p>
    * Strips out the ws:security header if any.
-   * <p/>
+   * <p>
    * Assumes that the attachments are already decrypted.
    *
    * @param message
@@ -854,7 +846,7 @@ public class SWA12Util {
     return properties;
   }
 
-  private static void  consumeResponseAttachments(SOAPMessage newMessage, List<Attachment> responseAttachments) throws IOException, SOAPException {
+  private static void consumeResponseAttachments(SOAPMessage newMessage, List<Attachment> responseAttachments) throws IOException, SOAPException {
     for (Attachment at : responseAttachments) {
       InputStream is = at.getSourceStream();
       if (is.available() <= 0)
@@ -883,6 +875,7 @@ public class SWA12Util {
       newMessage.addAttachmentPart(ap);
     }
   }
+
   public static void main(String[] args) throws Exception {
     disableSslVerification();
 

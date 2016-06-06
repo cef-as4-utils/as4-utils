@@ -33,8 +33,8 @@ public class Test {
 
 
     try {
-      SWA12Util.init("ibmgw", "123456", "ibmgw2", "123456", "trust", "123456", readBinaryFile("certs/ibmgw.jks"),
-          readBinaryFile("certs/ibmgw2.jks"), readBinaryFile("certs/trust.jks"));
+      SWA12Util.init("ibmgw-c2", "123456", "ibmgw-c3", "123456", "trust", "123456", readBinaryFile("certs/ibmgw-c2.jks"),
+          readBinaryFile("certs/ibmgw-c3.jks"), readBinaryFile("certs/trust.jks"));
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -211,11 +211,8 @@ public class Test {
   @org.junit.Test
   public void testSignAndVerify() throws Exception {
     SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/david.txt"));
+    message1.writeTo(new FileOutputStream("samples/david.xml"));
 
-    //  Node firstChild = message1.getSOAPHeader().getLastChild();
-//    System.out.println(firstChild.getLocalName());
-
-    //firstChild.getAttributes().removeNamedItem("xmlns");
 
     writeFile("/Users/yerlibilgin/Desktop/original.xml", prettyPrint(message1.getSOAPHeader().getFirstChild().getNextSibling()));
 
@@ -237,6 +234,17 @@ public class Test {
 
     SOAPMessage plain3 = verifyAndDecrypt(packed2, Corner.CORNER_3);
     System.out.println(describe(plain3));
+  }
+
+
+  @org.junit.Test
+  public void testIBMC3Message() throws Exception {
+    String file = "baseplainmessage.txt";
+    SOAPMessage message2 = deserializeSOAPMessage(new FileInputStream("samples/" + file));
+
+    System.out.println(describe(message2));
+    SOAPMessage plain1 = verifyAndDecrypt(message2, Corner.CORNER_3);
+    System.out.println(describe(plain1));
   }
 
 }
