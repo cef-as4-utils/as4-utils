@@ -1,24 +1,21 @@
 package swa12utils;
 
+import minder.as4Utils.Corner;
+import minder.as4Utils.SWA12Util;
 import org.apache.log4j.PropertyConfigurator;
 import org.apache.wss4j.common.ext.WSSecurityException;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
-import minder.as4Utils.SWA12Util;
-import minder.as4Utils.Corner;
+
+import javax.xml.soap.SOAPMessage;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.util.Base64;
+import java.util.List;
 
 import static minder.as4Utils.SWA12Util.*;
-
-import javax.xml.bind.DatatypeConverter;
-import javax.xml.soap.MimeHeader;
-import javax.xml.soap.SOAPMessage;
-import java.io.*;
-import java.net.URL;
-import java.util.Base64;
-import java.util.Iterator;
-import java.util.List;
 
 /**
  * Created by yerlibilgin on 25/05/15.
@@ -137,7 +134,7 @@ public class Test {
   @org.junit.Test
   public void testSerializeDeserializeSerialize() throws Exception {
     System.out.println("EEE");
-    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap.bin"), true);
+    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/soap.bin"));
     final String[] header = message1.getMimeHeaders().getHeader("content-type");
     message1.getMimeHeaders().removeAllHeaders();
     message1.getMimeHeaders().addHeader("content-type", header[0]);
@@ -210,19 +207,13 @@ public class Test {
 
   @org.junit.Test
   public void testSignAndVerify() throws Exception {
-    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/david.txt"));
-    message1.writeTo(new FileOutputStream("samples/david.xml"));
+    String file = "message1.txt";
+    SOAPMessage message1 = deserializeSOAPMessage(new FileInputStream("samples/" + file));
 
-
-    writeFile("/Users/yerlibilgin/Desktop/original.xml", prettyPrint(message1.getSOAPHeader().getFirstChild().getNextSibling()));
-
-    SOAPMessage plain1 = verifyAndDecrypt(message1, Corner.CORNER_3);
-    System.out.println(describe(plain1));
-
-    SOAPMessage signed = sign(plain1, Corner.CORNER_3);
+    SOAPMessage signed = signAndEncrypt(message1, Corner.CORNER_3);
     System.out.println(describe(signed));
 
-    writeFile("/Users/yerlibilgin/Desktop/signed.xml", prettyPrint(signed.getSOAPHeader().getFirstChild()));
+    writeFile("samples/signed.xml", prettyPrint(signed.getSOAPHeader().getFirstChild()));
 
     SOAPMessage plain2 = verifyAndDecrypt(signed, Corner.CORNER_2);
     System.out.println(describe(plain2));
@@ -230,7 +221,7 @@ public class Test {
     SOAPMessage packed2 = sign(plain2, Corner.CORNER_2);
     System.out.println(describe(packed2));
 
-    writeFile("/Users/yerlibilgin/Desktop/plain.xml", prettyPrint(packed2.getSOAPHeader().getFirstChild()));
+    writeFile("samples/plain.xml", prettyPrint(packed2.getSOAPHeader().getFirstChild()));
 
     SOAPMessage plain3 = verifyAndDecrypt(packed2, Corner.CORNER_3);
     System.out.println(describe(plain3));
@@ -238,13 +229,31 @@ public class Test {
 
 
   @org.junit.Test
-  public void testIBMC3Message() throws Exception {
-    String file = "baseplainmessage.txt";
-    SOAPMessage message2 = deserializeSOAPMessage(new FileInputStream("samples/" + file));
-
+  public void testMultipartMime() throws Exception {
+    String file = "message1.txt";
+    FileInputStream fileInputStream = new FileInputStream("samples/" + file);
+    SOAPMessage message2 = deserializeSOAPMessage(fileInputStream);
     System.out.println(describe(message2));
-    SOAPMessage plain1 = verifyAndDecrypt(message2, Corner.CORNER_3);
-    System.out.println(describe(plain1));
+    SOAPMessage soapMessage = signAndEncrypt(message2, Corner.CORNER_2);
+    System.out.println(describe(soapMessage));
+
+    SOAPMessage soapMessage1 = verifyAndDecrypt(message2, Corner.CORNER_3);
+    System.out.println(describe(soapMessage1));
   }
+
+
+  @org.junit.Test
+  public void testPureXMlMessage() throws Exception {
+    String file = "message2.txt";
+    FileInputStream fileInputStream = new FileInputStream("samples/" + file);
+    SOAPMessage message2 = deserializeSOAPMessage(fileInputStream);
+    System.out.println(describe(message2));
+    SOAPMessage soapMessage = signAndEncrypt(message2, Corner.CORNER_2);
+    System.out.println(describe(soapMessage));
+
+    SOAPMessage soapMessage1 = verifyAndDecrypt(message2, Corner.CORNER_3);
+    System.out.println(describe(soapMessage1));
+  }
+
 
 }

@@ -104,8 +104,11 @@ public class SWA12Util {
 
   /**
    * Create an object array of two items:
-   * 1 - A LinkedHashMap containing header name and header values fields. (for mime headers)
-   * 2 - the byte array of the SOAPMessage
+   * create a byte array that includes:
+   * LENGTH OF HEADER - 4 bytes
+   * HEADER
+   * LENGTH OF MESSAGE - 4 bytes
+   * MESSAGE
    *
    * @param headers
    * @param message
@@ -113,22 +116,44 @@ public class SWA12Util {
    */
   public static byte[] serializeSOAPMessage(MimeHeaders headers, SOAPMessage message) {
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    PrintStream ps = new PrintStream(baos);
-
-    headers.getAllHeaders().forEachRemaining(hdr -> {
-      MimeHeader mh = (MimeHeader) hdr;
-      ps.print(mh.getName());
-      ps.print(": ");
-      ps.println(mh.getValue());
-    });
-    ps.println();
+    DataOutputStream daos = new DataOutputStream(baos);
 
 
     try {
-      message.writeTo(ps);
-    } catch (Exception e) {
-      throw new RuntimeException(e);
+
+      //first write the message
+      byte[] bodyArray = writeMessageToByeArray(message);
+      //now grab the header do this in the second order because after writeMess... the header changes
+
+//      Iterator iterator = message.getMimeHeaders().getAllHeaders();
+//
+//      String partIdentifier = null;
+//      while (iterator.hasNext()) {
+//        MimeHeader header = (MimeHeader) iterator.next();
+//        if (header.getName().equalsIgnoreCase("content-type")) {
+//          int beginIndex = header.getValue().indexOf("boundary=\"");
+//          if (beginIndex < 0) {
+//            throw new RuntimeException("invalid content type " + header.getValue());
+//          }
+//
+//          beginIndex = header.getValue().indexOf('\"', beginIndex) + 1;
+//          int endIndex = header.getValue().indexOf('\"', beginIndex);
+//          partIdentifier = header.getValue().substring(beginIndex, endIndex);
+//          break;
+//        }
+//      }
+//
+//      if (partIdentifier != null) {
+//        byte[] headerBytes = partIdentifier.getBytes();
+//        daos.write(headerBytes);
+//        daos.writeByte('\n');
+//      }
+      daos.write(bodyArray);
+      daos.close();
+
+    } catch (Exception ex) {
     }
+
 
     return baos.toByteArray();
   }
@@ -154,34 +179,48 @@ public class SWA12Util {
     return deserializeSOAPMessage(new ByteArrayInputStream(serialized));
   }
 
-  public static SOAPMessage deserializeSOAPMessage(InputStream is) {
-    return deserializeSOAPMessage(is, false);
-  }
-
-  public static SOAPMessage deserializeSOAPMessage(InputStream is, boolean close) {
+  public static SOAPMessage deserializeSOAPMessage(InputStream inputStream) {
+    PushbackInputStream pushbackInputStream = new PushbackInputStream(inputStream, 100);
     try {
-      BufferedReader br = new BufferedReader(new InputStreamReader(is));
+      byte[] identifier2 = new byte[100];
+      MimeHeaders headers = null;
+      int len = pushbackInputStream.read(identifier2, 0, identifier2.length);
+      pushbackInputStream.unread(identifier2, 0, len);
+      //check the first two characters and see if they are '-'
 
-      MimeHeaders headers = new MimeHeaders();
+      if (identifier2[0] == '-' && identifier2[1] == '-') {
+        //get the line and parse the part identifier
 
-      String line = null;
+        byte[] partIdentifier = new byte[100];
 
-      while (!(line = br.readLine()).isEmpty()) {
-        int indexOf = line.indexOf(':');
-        headers.addHeader(line.substring(0, indexOf), line.substring(indexOf + 1).trim());
+        int index = 0;
+
+        byte current = 0;
+
+        do {
+          current = (byte) pushbackInputStream.read();
+          partIdentifier[index++] = current;
+        } while (current != '\n');
+
+        //now put back
+        pushbackInputStream.unread(partIdentifier, 0, index);
+
+        String part = new String(partIdentifier, 2, index - 2).trim();
+
+        System.out.println(part);
+        headers = new MimeHeaders();
+        headers.addHeader("Content-Type", "multipart/related; boundary=\"" + part + "\"; type=\"application/soap+xml\"");
+        return messageFactory.createMessage(headers, pushbackInputStream);
+      } else {
+        //try to read directly
+        return messageFactory.createMessage(null, pushbackInputStream);
       }
-
-
-      return createMessage(headers, is);
+    } catch (RuntimeException e) {
+      LOG.error(e.getMessage(), e);
+      throw e;
     } catch (Exception e) {
       LOG.error(e.getMessage(), e);
       throw new RuntimeException(e);
-    } finally {
-      if (close)
-        try {
-          is.close();
-        } catch (Exception ex) {
-        }
     }
   }
 
@@ -486,7 +525,8 @@ public class SWA12Util {
    */
   public static SOAPMessage signAndEncrypt(SOAPMessage message, Corner sender) {
     try {
-      SOAPMessage newMessage = deserializeSOAPMessage(serializeSOAPMessage(message.getMimeHeaders(), message));
+      byte[] serialized = serializeSOAPMessage(message.getMimeHeaders(), message);
+      SOAPMessage newMessage = deserializeSOAPMessage(serialized);
       Document doc = newMessage.getSOAPPart();
 
       WSSecHeader secHeader = new WSSecHeader();
@@ -968,5 +1008,6 @@ public class SWA12Util {
     System.out.println(describe(message));
     System.out.println("==================================================");
   }
+
 }
 
