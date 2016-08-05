@@ -221,7 +221,7 @@ public class Merlin extends org.apache.wss4j.common.crypto.Merlin {
         if (DO_DEBUG) {
           LOG.debug(e.getMessage(), e);
         }
-        throw new WSSecurityException(WSSecurityException.ErrorCode.FAILURE, "failedCredentialLoad", e);
+        throw new WSSecurityException(WSSecurityException.ErrorCode.FAILURE, e, "failedCredentialLoad");
       }
     }
   }

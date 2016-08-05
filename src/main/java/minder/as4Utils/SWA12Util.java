@@ -10,8 +10,8 @@ import org.apache.wss4j.common.ext.WSSecurityException;
 import org.apache.wss4j.common.util.AttachmentUtils;
 import org.apache.wss4j.common.util.XMLUtils;
 import org.apache.wss4j.dom.WSConstants;
-import org.apache.wss4j.dom.WSSConfig;
-import org.apache.wss4j.dom.WSSecurityEngine;
+import org.apache.wss4j.dom.engine.WSSConfig;
+import org.apache.wss4j.dom.engine.WSSecurityEngine;
 import org.apache.wss4j.dom.handler.RequestData;
 import org.apache.wss4j.dom.handler.WSHandlerResult;
 import org.apache.wss4j.dom.message.WSSecEncrypt;
@@ -436,8 +436,8 @@ public class SWA12Util {
 
     consumeResponseAttachments(newMessage, responseAttachments);
 
-    WSSecHeader header = new WSSecHeader();
-    header.removeSecurityHeader(newMessage.getSOAPPart());
+    WSSecHeader header = new WSSecHeader(newMessage.getSOAPPart());
+    header.removeSecurityHeader();
     newMessage.saveChanges();
 
     return newMessage;
@@ -479,8 +479,8 @@ public class SWA12Util {
       stripWSSEC(newMessage.getSOAPPart());
       Document doc = newMessage.getSOAPPart();
 
-      WSSecHeader secHeader = new WSSecHeader();
-      secHeader.insertSecurityHeader(doc);
+      WSSecHeader secHeader = new WSSecHeader(doc);
+      secHeader.insertSecurityHeader();
 
       final List<Attachment> attachments = parts2att(message);
 
@@ -529,9 +529,9 @@ public class SWA12Util {
       SOAPMessage newMessage = deserializeSOAPMessage(serialized);
       Document doc = newMessage.getSOAPPart();
 
-      WSSecHeader secHeader = new WSSecHeader();
-      secHeader.removeSecurityHeader(doc);
-      secHeader.insertSecurityHeader(doc);
+      WSSecHeader secHeader = new WSSecHeader(doc);
+      secHeader.removeSecurityHeader();
+      secHeader.insertSecurityHeader();
 
       WSSecSignature signature = new WSSecSignature();
       //if C2 is sending, then sign with C2 key.
@@ -621,9 +621,9 @@ public class SWA12Util {
    * @return
    */
   public static void stripWSSEC(Document document) {
-    WSSecHeader secHeader = new WSSecHeader();
+    WSSecHeader secHeader = new WSSecHeader(document);
     try {
-      secHeader.removeSecurityHeader(document);
+      secHeader.removeSecurityHeader();
     } catch (WSSecurityException e) {
       e.printStackTrace();
     }

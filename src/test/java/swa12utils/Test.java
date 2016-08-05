@@ -10,8 +10,12 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 
 import javax.xml.soap.SOAPMessage;
+import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStreamReader;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.Base64;
 import java.util.List;
 
@@ -236,6 +240,7 @@ public class Test {
     System.out.println(describe(message2));
     SOAPMessage soapMessage = signAndEncrypt(message2, Corner.CORNER_2);
     System.out.println(describe(soapMessage));
+    soapMessage.writeTo(new FileOutputStream("samples/encrypted2.dat"));
 
     SOAPMessage soapMessage1 = verifyAndDecrypt(message2, Corner.CORNER_3);
     System.out.println(describe(soapMessage1));
@@ -256,4 +261,77 @@ public class Test {
   }
 
 
+
+  @org.junit.Test
+  public void testReadIbmMessage() throws Exception {
+    String file = "C2-to-AS4Interceptor.dat";
+    FileInputStream fileInputStream = new FileInputStream("samples/" + file);
+    SOAPMessage message2 = deserializeSOAPMessage(fileInputStream);
+    System.out.println(describe(message2));
+
+    SOAPMessage soapMessage1 = verifyAndDecrypt(message2, Corner.CORNER_3);
+    System.out.println(describe(soapMessage1));
+  }
+
+
+  @org.junit.Test
+  public void testReadInterceptorMessage() throws Exception {
+    String file = "AS4Interceptor-to-C3-1.dat";
+    FileInputStream fileInputStream = new FileInputStream("samples/" + file);
+    SOAPMessage message2 = deserializeSOAPMessage(fileInputStream);
+    System.out.println(describe(message2));
+
+    SOAPMessage soapMessage1 = verifyAndDecrypt(message2, Corner.CORNER_3);
+    System.out.println(describe(soapMessage1));
+  }
+
+
+
+  @org.junit.Test
+  public void testReadEncryptedMessage() throws Exception {
+    String file = "encrypted.dat";
+    FileInputStream fileInputStream = new FileInputStream("samples/" + file);
+    SOAPMessage message2 = deserializeSOAPMessage(fileInputStream);
+    System.out.println(describe(message2));
+
+    SOAPMessage soapMessage1 = verifyAndDecrypt(message2, Corner.CORNER_3);
+    System.out.println(describe(soapMessage1));
+  }
+
+
+
+  @org.junit.Test
+  public void testSendMessage() throws Exception {
+    String file = "EncryptedData.dat";
+    String targetUrl = "mindertestbed.org";
+    int port = 15001;
+
+    System.out.println("Connect");
+    Socket socket = new Socket();
+    socket.connect(new InetSocketAddress(targetUrl, port));
+
+    System.out.println("Write file");
+    FileInputStream fileInputStream = new FileInputStream("samples/" + file);
+    byte []buffer = new byte[10240];
+
+    int read;
+
+    while((read = fileInputStream.read(buffer)) > 0){
+      System.out.println("Read " + read);
+      socket.getOutputStream().write(buffer, 0 , read);
+      socket.getOutputStream().flush();
+    }
+
+    System.out.println("Read response");
+    BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+    String line;
+
+    while((line = br.readLine()) != null){
+      System.out.println(line);
+    }
+    socket.close();
+
+    System.out.println("Done");
+  }
 }
