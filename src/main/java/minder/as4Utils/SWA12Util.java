@@ -2,6 +2,7 @@ package minder.as4Utils;
 
 import org.apache.log4j.PropertyConfigurator;
 import org.apache.wss4j.common.WSEncryptionPart;
+import org.apache.wss4j.common.WSS4JConstants;
 import org.apache.wss4j.common.bsp.BSPRule;
 import org.apache.wss4j.common.crypto.Crypto;
 import org.apache.wss4j.common.crypto.CryptoFactory;
@@ -17,7 +18,14 @@ import org.apache.wss4j.dom.handler.WSHandlerResult;
 import org.apache.wss4j.dom.message.WSSecEncrypt;
 import org.apache.wss4j.dom.message.WSSecHeader;
 import org.apache.wss4j.dom.message.WSSecSignature;
+import org.apache.xml.security.encryption.EncryptedData;
+import org.apache.xml.security.encryption.EncryptedKey;
+import org.apache.xml.security.encryption.XMLCipher;
+import org.apache.xml.security.exceptions.XMLSecurityException;
+import org.apache.xml.security.signature.XMLSignature;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 import javax.net.ssl.*;
@@ -35,31 +43,44 @@ import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.io.*;
+import java.lang.reflect.Array;
 import java.net.URL;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
+import java.security.Security;
 import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
  * Created by yerlibilgin on 13/05/15.
  */
-public class SWA12Util {
-  public static String signatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
-  public static int encKeyIdentifierType = WSConstants.SKI_KEY_IDENTIFIER;
-  public static String symmetricEncAlgorithm = WSConstants.AES_128_GCM;
-  public static int signKeyIdentifierType = WSConstants.BST_DIRECT_REFERENCE;
-  public static String digestAlgorithm = WSConstants.SHA256;
+
+public class SWA12Util extends WSS4JConstants {
+
+  public static final String RSA_SHA256 =
+     "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+
+  public static final String E_SENS_DEFAULT = "E_SENS_DEFAULT";
+  public static final String INHERIT = "INHERIT";
+
+  public static String XMLENC_symmetricEncAlgorithm = AES_128_GCM;
+  public static String XMLENC_keyEncryptionAlgorithm = KEYTRANSPORT_RSAOAEP_XENC11;
+  public static String XMLENC_digestAlgorithm = SHA256;
+
+
+  public static String XMLSIG_signatureAlgorithm = RSA_SHA256;
+  private static String XMLSIG_cannonicalizationAlgo = C14N_EXCL_OMIT_COMMENTS;
 
   static MessageFactory messageFactory = null;
   static SOAPConnectionFactory soapConnectionFactory = null;
 
   private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(SWA12Util.class);
   private static HashMap<String, byte[]> keyStoreBytes = new HashMap<>();
-
 
   static {
     try {
@@ -329,6 +350,7 @@ public class SWA12Util {
   }
 
   public static void init(String c2, String c3, String trust) {
+    Security.addProvider(new BouncyCastleProvider());
     try {
       setKeyStoreBytes("c2.jks", readResource("c2.jks"));
       setKeyStoreBytes("c3.jks", readResource("c3.jks"));
@@ -338,8 +360,8 @@ public class SWA12Util {
     }
     try {
       PropertyConfigurator.configure(
-          Thread.currentThread().getContextClassLoader().getResource(
-              "logging.properties"));
+         Thread.currentThread().getContextClassLoader().getResource(
+            "logging.properties"));
     } catch (Exception ex) {
       ex.printStackTrace();
     }
@@ -362,8 +384,8 @@ public class SWA12Util {
 
     try {
       PropertyConfigurator.configure(
-          Thread.currentThread().getContextClassLoader().getResource(
-              "logging.properties"));
+         Thread.currentThread().getContextClassLoader().getResource(
+            "logging.properties"));
     } catch (Exception ex) {
       ex.printStackTrace();
     }
@@ -383,8 +405,8 @@ public class SWA12Util {
   public static void init(Properties c2, Properties c3, Properties trust) {
     try {
       PropertyConfigurator.configure(
-          Thread.currentThread().getContextClassLoader().getResource(
-              "logging.properties"));
+         Thread.currentThread().getContextClassLoader().getResource(
+            "logging.properties"));
     } catch (Exception ex) {
       ex.printStackTrace();
     }
@@ -425,6 +447,7 @@ public class SWA12Util {
   //region Extract Attachments
   public static SOAPMessage verifyAndDecrypt(SOAPMessage message, Corner receiver) throws Exception {
     SOAPMessage newMessage = deserializeSOAPMessage(serializeSOAPMessage(message.getMimeHeaders(), message));
+
 
     final List<Attachment> attachments = parts2att(message);
 
@@ -469,9 +492,25 @@ public class SWA12Util {
    * <p>
    * Assumes that the attachments are already decrypted.
    *
-   * @param message
+   * @param message plain message to be signed
+   * @param sender  the corner that sent the message
    */
   public static SOAPMessage sign(SOAPMessage message, Corner sender) {
+    return sign(message, sender, null);
+  }
+
+  /**
+   * Signs the soap message (no encrpytion)
+   * <p>
+   * Strips out the ws:security header if any.
+   * <p>
+   * Assumes that the attachments are already decrypted.
+   *
+   * @param message        plain message to be signed
+   * @param sender         the corner that sent the message
+   * @param previousHeader The header that the xml security properties will be copied from (maybe null)
+   */
+  public static SOAPMessage sign(SOAPMessage message, Corner sender, SOAPHeader previousHeader) {
     try {
       message.saveChanges();
       SOAPMessage newMessage = deserializeSOAPMessage(serializeSOAPMessage(message.getMimeHeaders(), message));
@@ -490,9 +529,11 @@ public class SWA12Util {
       signature.getParts().add(new WSEncryptionPart("Messaging", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/", "Content"));
       signature.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Element"));
       signature.getParts().add(new WSEncryptionPart("cid:Attachments", "Content"));
-      signature.setDigestAlgo(digestAlgorithm);
-      signature.setSignatureAlgorithm(signatureAlgorithm);
-      signature.setKeyIdentifierType(signKeyIdentifierType);
+
+
+      prepareAlgorithmsForSigning(previousHeader, signature);
+
+      signature.setKeyIdentifierType(WSConstants.BST_DIRECT_REFERENCE);
 
       AttachmentCallbackHandler attachmentCallbackHandler = new AttachmentCallbackHandler(attachments);
       signature.setAttachmentCallbackHandler(attachmentCallbackHandler);
@@ -521,9 +562,25 @@ public class SWA12Util {
    * <p>
    * Assumes that the attachments are already decrypted.
    *
-   * @param message
+   * @param message The plain message to be signed and encrypted
+   * @param sender  Corner that sends the message (C2 or C3)
    */
   public static SOAPMessage signAndEncrypt(SOAPMessage message, Corner sender) {
+    return signAndEncrypt(message, sender, null);
+  }
+
+  /**
+   * Signs then encrypts soap message together with the attachments.
+   * <p>
+   * Strips out the ws:security header if any.
+   * <p>
+   * Assumes that the attachments are already decrypted.
+   *
+   * @param message        The plain message to be signed and encrypted
+   * @param sender         Corner that sends the message (C2 or C3)
+   * @param previousHeader The header that the xml security properties will be copied from (maybe null)
+   */
+  public static SOAPMessage signAndEncrypt(SOAPMessage message, Corner sender, SOAPHeader previousHeader) {
     try {
       byte[] serialized = serializeSOAPMessage(message.getMimeHeaders(), message);
       SOAPMessage newMessage = deserializeSOAPMessage(serialized);
@@ -539,10 +596,7 @@ public class SWA12Util {
       signature.getParts().add(new WSEncryptionPart("Messaging", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/", "Content"));
       signature.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Element"));
 
-      signature.setDigestAlgo(digestAlgorithm);
-      signature.setSignatureAlgorithm(signatureAlgorithm);
-      signature.setKeyIdentifierType(signKeyIdentifierType);
-
+      prepareAlgorithmsForSigning(previousHeader, signature);
 
       AttachmentCallbackHandler attachmentCallbackHandler = null;
       final int attachmentCount = newMessage.countAttachments();
@@ -560,13 +614,12 @@ public class SWA12Util {
         LOG.debug(outputString);
       }
 
-
       WSSecEncrypt encrypt = new WSSecEncrypt();
       //if C2 is sending, then enrypt with C3 certificate.
       encrypt.setUserInfo(sender == Corner.CORNER_2 ? USER_C3 : USER_C2, sender == Corner.CORNER_2 ? PWD_C3 : PWD_C2);
-      encrypt.setKeyIdentifierType(encKeyIdentifierType);
-      encrypt.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Content"));
-      encrypt.setSymmetricEncAlgorithm(symmetricEncAlgorithm);
+
+
+      prepareAlgorithmsForEncryption(encrypt, previousHeader);
 
       if (attachmentCount > 0) {
         encrypt.getParts().add(new WSEncryptionPart("cid:Attachments", "Element"));
@@ -574,7 +627,6 @@ public class SWA12Util {
         attachmentCallbackHandler = new AttachmentCallbackHandler(signedAttachments);
         encrypt.setAttachmentCallbackHandler(attachmentCallbackHandler);
       }
-
 
       //if C2 is sending, then enrypt with C3 certificate.
       encrypt.build(doc, sender == Corner.CORNER_2 ? c3Crypto : c2Crypto, secHeader);
@@ -584,6 +636,7 @@ public class SWA12Util {
         consumeResponseAttachments(newMessage, attachmentCallbackHandler.getResponseAttachments());
       }
       newMessage.saveChanges();
+
       return newMessage;
     } catch (Throwable e) {
       throw new RuntimeException(e);
@@ -597,9 +650,9 @@ public class SWA12Util {
       public void accept(final AttachmentPart o) {
         final Attachment at = new Attachment();
         o.getAllMimeHeaders().forEachRemaining(hdr -> {
-              MimeHeader header = (MimeHeader) hdr;
-              at.addHeader(header.getName(), header.getValue());
-            }
+             MimeHeader header = (MimeHeader) hdr;
+             at.addHeader(header.getName(), header.getValue());
+           }
         );
 
         at.setMimeType(o.getContentType());
@@ -734,7 +787,7 @@ public class SWA12Util {
     return xPath;
   }
 
-  private static void disableSslVerification() {
+  static void disableSslVerification() {
     try {
       // Create a trust manager that does not validate certificate chains
       TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
@@ -872,10 +925,10 @@ public class SWA12Util {
 
   private static Properties createProperty(String alias, String password) {
     String propertyString = "org.apache.wss4j.crypto.provider=minder.as4Utils.Merlin\n" +
-        "org.apache.wss4j.crypto.merlin.keystore.type=jks\n" +
-        "org.apache.wss4j.crypto.merlin.keystore.password=" + password + "\n" +
-        "org.apache.wss4j.crypto.merlin.keystore.alias=" + alias + "\n" +
-        "org.apache.wss4j.crypto.merlin.keystore.file=" + alias + "\n";
+       "org.apache.wss4j.crypto.merlin.keystore.type=jks\n" +
+       "org.apache.wss4j.crypto.merlin.keystore.password=" + password + "\n" +
+       "org.apache.wss4j.crypto.merlin.keystore.alias=" + alias + "\n" +
+       "org.apache.wss4j.crypto.merlin.keystore.file=" + alias + "\n";
 
     Properties properties = new Properties();
     try {
@@ -916,98 +969,206 @@ public class SWA12Util {
     }
   }
 
-  public static void main(String[] args) throws Exception {
-    disableSslVerification();
 
-    symmetricEncAlgorithm = WSConstants.AES_128_GCM;
-    init("ibmgw", "123456", "ibmgw2", "123456", "trust", "123456", readBinaryFile("certs/ibmgw.jks"),
-        readBinaryFile("certs/ibmgw2.jks"), readBinaryFile("certs/trust.jks"));
+  private static void prepareAlgorithmsForEncryption(WSSecEncrypt encrypt, SOAPHeader previousHeader) throws XMLSecurityException {
+    encrypt.setKeyIdentifierType(WSConstants.SKI_KEY_IDENTIFIER);
+    //Body encryption removed as a requirement from esens test cases
+    //encrypt.getParts().add(new WSEncryptionPart("Body", "http://www.w3.org/2003/05/soap-envelope", "Content"));
+
+    switch (XMLENC_symmetricEncAlgorithm) {
+      case E_SENS_DEFAULT:
+        encrypt.setSymmetricEncAlgorithm(AES_128_GCM);
+        break;
+
+      case INHERIT:
+        //use what ever was provided in the message
+        useEncValuesInsecHdr4Data(encrypt, previousHeader);
+        break;
+
+      default:
+        encrypt.setSymmetricEncAlgorithm(XMLENC_symmetricEncAlgorithm);
+        break;
+    }
+
+    String keyEncAlg;
+    switch (XMLENC_keyEncryptionAlgorithm) {
+      case E_SENS_DEFAULT:
+      case "":
+        encrypt.setKeyEncAlgo(KEYTRANSPORT_RSAOAEP_XENC11);
+        keyEncAlg = KEYTRANSPORT_RSAOAEP_XENC11;
+        break;
+
+      case INHERIT:
+        keyEncAlg = useEncKeyEncAlgFrom(previousHeader, encrypt);
+        break;
+
+      default:
+        encrypt.setKeyEncAlgo(XMLENC_keyEncryptionAlgorithm);
+        keyEncAlg = XMLENC_keyEncryptionAlgorithm;
+        break;
+    }
 
 
-    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/payload(51).dat"));
-    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/soap_serialized.xml"));
-    SOAPMessage message = deserializeSOAPMessage(new FileInputStream("samples/david.txt"));
+    if (!keyEncAlg.equals(KEYTRANSPORT_RSA15)) {
+      switch (XMLENC_digestAlgorithm) {
+        case E_SENS_DEFAULT:
+          encrypt.setDigestAlgorithm(SHA256);
+          break;
 
-    System.out.println(prettyPrint(message.getSOAPPart()));
+        case INHERIT:
+        case "":
+          useEncKeyDigestAlgFrom(previousHeader, encrypt);
+          break;
 
-    HttpSOAPConnection con = new HttpSOAPConnection();
-    //con.call(message, new URL(""));
-    //final String url = "http://localhost:15001/as4Interceptor";
-    final String url = "https://193.140.74.199:15000/as4Interceptor";
-    //final String url = "https://5.153.46.51:29002/AS4";
-
-
-    message = verifyAndDecrypt(message, Corner.CORNER_3);
-
-    System.out.println(describe(message));
-
-    final Object next =
-        message.getAttachments().next();
-
-    AttachmentPart atp = (AttachmentPart) next;
-
-    byte[] myMessage = "Merhaba ben muhammet".getBytes();
-    myMessage = gzip(myMessage);
-    atp.setRawContentBytes(myMessage, 0, myMessage.length, atp.getContentType());
-    replaceAttachments(message, Arrays.asList(atp));
-
-    message = signAndEncrypt(message, Corner.CORNER_2);
-
-    System.out.println(describe(message));
-
-    System.out.println("Send message");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    System.out.println("-----------------------------");
-    message = con.call(message, new URL(url));
-    System.out.println(prettyPrint(message.getSOAPPart()));
+        default:
+          encrypt.setDigestAlgorithm(XMLENC_digestAlgorithm);
+          break;
+      }
+    }
   }
 
-  public static void main2(String[] args) throws Exception {
-    disableSslVerification();
+  private static void useEncValuesInsecHdr4Data(WSSecEncrypt encrypt, SOAPHeader soapHeader) throws XMLSecurityException {
+    if (soapHeader == null) {
+      throw new RuntimeException("Previous soap header must not be null if you use INHERIT for the parameters");
+    }
 
-    init("ibmgw", "123456", "ibmgw2", "123456", "trust", "123456", readBinaryFile("certs/ibmgw.jks"),
-        readBinaryFile("certs/ibmgw2.jks"), readBinaryFile("certs/trust.jks"));
-
-
-    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/payload(51).dat"));
-    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/soap_serialized.xml"));
-    //final SOAPMessage message = deserializeSOAPMessage(new FileInputStream("samples/david.txt"));
-    SOAPMessage message = createMessage();
-    final AttachmentPart part = message.createAttachmentPart();
-    final byte[] bytes = "muhammet".getBytes();
-    part.setContentId("basidnanberi");
-    part.setRawContentBytes(bytes, 0, bytes.length, "application/octet-stream");
-    message.addAttachmentPart(part);
-
-    SOAPElement element = message.getSOAPHeader().addChildElement("Messaging", "eb", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/");
-    element.addTextNode("User Message");
-    element = message.getSOAPBody().addChildElement("question");
-    element.addTextNode("What is your name?");
-
-    message.saveChanges();
-
-    System.out.println("Describe plain message");
-    System.out.println(describe(message));
-    System.out.println("==================================================");
-    message = signAndEncrypt(message, Corner.CORNER_2);
-    System.out.println("Describe enc message");
-    System.out.println(describe(message));
-    System.out.println("==================================================");
-
-    message = verifyAndDecrypt(message, Corner.CORNER_3);
-    System.out.println("Describe reopened message");
-    System.out.println(describe(message));
-    System.out.println("==================================================");
+    Element el = findSingleNode(soapHeader, "//:EncryptedData");
+    XMLCipher cipher = XMLCipher.getInstance();
+    cipher.init(XMLCipher.DECRYPT_MODE, null);
+    EncryptedData encryptedData = cipher.loadEncryptedData(soapHeader.getOwnerDocument(), el);
+    String algorithm = encryptedData.getEncryptionMethod().getAlgorithm();
+    encrypt.setSymmetricEncAlgorithm(algorithm);
+    LOG.debug("Symmetric Encryption Algoritm " + algorithm);
   }
 
+  private static String useEncKeyEncAlgFrom(SOAPHeader soapHeader, WSSecEncrypt encrypt) throws XMLSecurityException {
+    if (soapHeader == null) {
+      throw new XMLSecurityException("Previous soap header must not be null if you use INHERIT for the parameters");
+    }
+    Element el = findSingleNode(soapHeader, "//:EncryptedKey");
+    XMLCipher cipher = XMLCipher.getInstance();
+    cipher.init(XMLCipher.DECRYPT_MODE, null);
+    EncryptedKey encryptedKey = cipher.loadEncryptedKey(soapHeader.getOwnerDocument(), el);
+
+    String algorithm = encryptedKey.getEncryptionMethod().getAlgorithm();
+    encrypt.setKeyEncAlgo(algorithm);
+    LOG.debug("Key Encryption Algoritm " + algorithm);
+    return algorithm;
+  }
+
+  private static void useEncKeyDigestAlgFrom(SOAPHeader soapHeader, WSSecEncrypt encrypt) throws XMLSecurityException {
+    if (soapHeader == null) {
+      throw new XMLSecurityException("Previous soap header must not be null if you use INHERIT for the parameters");
+    }
+    Element el = findSingleNode(soapHeader, "//:EncryptedKey");
+    XMLCipher cipher = XMLCipher.getInstance();
+    cipher.init(XMLCipher.DECRYPT_MODE, null);
+    EncryptedKey encryptedKey = cipher.loadEncryptedKey(soapHeader.getOwnerDocument(), el);
+
+    String algorithm = encryptedKey.getEncryptionMethod().getDigestAlgorithm();
+    if (algorithm != null && !algorithm.isEmpty())
+      encrypt.setDigestAlgorithm(algorithm);
+    LOG.debug("Key Digest Algoritm " + algorithm);
+  }
+
+
+  /**
+   * Set the signature parameters (signature algorithm and digest method) from the previous security header
+   *
+   * @param signature
+   * @param soapHeader
+   */
+  private static void useSgnValuesInsecHeader(WSSecSignature signature, SOAPHeader soapHeader) throws XMLSecurityException {
+    if (soapHeader == null) {
+      throw new RuntimeException("Previous soap header must not be null if you use INHERIT for the parameters");
+    }
+
+    Element el = findSingleNode(soapHeader, "//:Signature");
+    XMLSignature xmlSignature = new XMLSignature(el, null);
+
+    String signatureAlgorithm = xmlSignature.getSignedInfo().getSignatureAlgorithm().getURI();
+    signature.setSignatureAlgorithm(signatureAlgorithm);
+
+    //set the digest algortim WRT the signature algorithm
+    if (RSA_SHA256.equals(signatureAlgorithm)) {
+      signature.setDigestAlgo(SHA256);
+    } else if (RSA_SHA1.equals(signatureAlgorithm)) {
+      signature.setDigestAlgo(SHA1);
+    } else if (DSA.equals(signatureAlgorithm)) {
+      signature.setDigestAlgo(SHA1);
+    } else {
+      throw new XMLSecurityException("Unsupported signature algorithm " + signatureAlgorithm);
+    }
+  }
+
+
+  private static void prepareAlgorithmsForSigning(SOAPHeader previousHeader, WSSecSignature signature) throws XMLSecurityException {
+    switch (XMLSIG_signatureAlgorithm) {
+      case E_SENS_DEFAULT:
+        //use e-sens default values (http://wiki.ds.unipi.gr/display/ESENS/PR+-+AS4+-+1.11)
+        signature.setSignatureAlgorithm(RSA_SHA256);
+        signature.setDigestAlgo(SHA256);
+        break;
+
+      case INHERIT:
+        //use what ever was provided in the message
+        useSgnValuesInsecHeader(signature, previousHeader);
+        break;
+
+      default:
+        signature.setSignatureAlgorithm(XMLSIG_signatureAlgorithm);
+        if(XMLSIG_signatureAlgorithm.endsWith("sha256")) {
+          signature.setDigestAlgo(SHA256);
+        } else if(XMLSIG_signatureAlgorithm.endsWith("sha1")){
+          signature.setDigestAlgo(SHA1);
+        }
+        break;
+    }
+    signature.setSigCanonicalization(XMLSIG_cannonicalizationAlgo);
+    signature.setKeyIdentifierType(WSConstants.BST_DIRECT_REFERENCE);
+  }
 }
 
+/*
+    XMLCipher instance = XMLCipher.getInstance();
+    instance.init(XMLCipher.DECRYPT_MODE, null);
+
+
+    Element el = findSingleNode(message.getSOAPHeader(), "//:EncryptedKey");
+    EncryptedKey encryptedKey = instance.loadEncryptedKey(el);
+    el = findSingleNode(message.getSOAPHeader(), "//:EncryptedData");
+    EncryptedData encryptedData = instance.loadEncryptedData(message.getSOAPHeader().getOwnerDocument(), el);
+
+
+    EncryptionMethod encryptionMethod = encryptedKey.getEncryptionMethod();
+    System.out.println(encryptionMethod.getAlgorithm());
+    System.out.println(encryptionMethod.getDigestAlgorithm());
+    System.out.println(encryptionMethod.getKeySize());
+    System.out.println(encryptionMethod.getMGFAlgorithm());
+    System.out.println(encryptionMethod.getOAEPparams());
+
+    CipherData cipherData = encryptedData.getCipherData();
+    String encoding = encryptedData.getEncoding();
+    EncryptionMethod encryptionMethod1 = encryptedData.getEncryptionMethod();
+
+    System.out.println(encryptionMethod1.getAlgorithm());
+    System.out.println(encryptionMethod1.getDigestAlgorithm());
+    System.out.println(encryptionMethod1.getKeySize());
+    System.out.println(encryptionMethod1.getMGFAlgorithm());
+    System.out.println(encryptionMethod1.getOAEPparams());
+
+    KeyInfo keyInfo = encryptedData.getKeyInfo();
+    System.out.println(keyInfo.containsX509Data());
+    System.out.println(keyInfo.getX509Certificate());
+
+    el = findSingleNode(message.getSOAPHeader(), "//:Signature");
+    XMLSignature xmlSignature = new XMLSignature(el, null);
+
+    System.out.println(prettyPrint(el));
+    System.out.println(xmlSignature.getSignedInfo().getSignatureAlgorithm().getBaseLocalName());
+    System.out.println(xmlSignature.getSignedInfo().getSignatureAlgorithm().getJCEAlgorithmString());
+    System.out.println(xmlSignature.getSignedInfo().getSignatureAlgorithm().getJCEProviderName());
+    System.out.println(xmlSignature.getSignedInfo().getSignatureAlgorithm().getURI());
+    System.out.println(xmlSignature.getSignedInfo().getSignatureMethodURI());
+
+ */

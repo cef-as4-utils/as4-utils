@@ -14,7 +14,7 @@ object TestMe {
    * Intercept the as4 message, verify the signature and signature algorithms
    */
   def main(input: Array[String]): Unit = {
-    val soapStr = Source.fromFile("soap3.xml").mkString.getBytes
+    val soapStr = Source.fromFile("samples/plain.txt").mkString.getBytes
 
     val soapMessage = SWA12Util.createMessage(null, new ByteArrayInputStream(soapStr))
 

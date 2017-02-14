@@ -1,14 +1,18 @@
-package swa12utils;
+package minder.as4Utils;
 
 import minder.as4Utils.Corner;
 import minder.as4Utils.SWA12Util;
 import org.apache.log4j.PropertyConfigurator;
 import org.apache.wss4j.common.ext.WSSecurityException;
+import org.apache.wss4j.dom.WSConstants;
 import org.junit.Assert;
 import org.junit.BeforeClass;
+import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 
+import javax.xml.soap.AttachmentPart;
+import javax.xml.soap.SOAPElement;
 import javax.xml.soap.SOAPMessage;
 import java.io.BufferedReader;
 import java.io.FileInputStream;
@@ -34,8 +38,11 @@ public class Test {
 
 
     try {
-      SWA12Util.init("ibmgw-c2", "123456", "ibmgw-c3", "123456", "trust", "123456", readBinaryFile("certs/ibmgw-c2.jks"),
-          readBinaryFile("certs/ibmgw-c3.jks"), readBinaryFile("certs/trust.jks"));
+      String basedir = "certs2";
+      String gateway = "as4-net";
+
+      SWA12Util.init(gateway + "-c2", "123456", gateway + "-c3", "123456", "trust", "123456", readBinaryFile(basedir + "/" + gateway + "-c2.jks"),
+         readBinaryFile(basedir + "/" + gateway + "-c3.jks"), readBinaryFile(basedir + "/trust.jks"));
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -261,7 +268,6 @@ public class Test {
   }
 
 
-
   @org.junit.Test
   public void testReadIbmMessage() throws Exception {
     String file = "C2-to-AS4Interceptor.dat";
@@ -286,7 +292,6 @@ public class Test {
   }
 
 
-
   @org.junit.Test
   public void testReadEncryptedMessage() throws Exception {
     String file = "encrypted.dat";
@@ -297,7 +302,6 @@ public class Test {
     SOAPMessage soapMessage1 = verifyAndDecrypt(message2, Corner.CORNER_3);
     System.out.println(describe(soapMessage1));
   }
-
 
 
   @org.junit.Test
@@ -312,13 +316,13 @@ public class Test {
 
     System.out.println("Write file");
     FileInputStream fileInputStream = new FileInputStream("samples/" + file);
-    byte []buffer = new byte[10240];
+    byte[] buffer = new byte[10240];
 
     int read;
 
-    while((read = fileInputStream.read(buffer)) > 0){
+    while ((read = fileInputStream.read(buffer)) > 0) {
       System.out.println("Read " + read);
-      socket.getOutputStream().write(buffer, 0 , read);
+      socket.getOutputStream().write(buffer, 0, read);
       socket.getOutputStream().flush();
     }
 
@@ -327,11 +331,46 @@ public class Test {
 
     String line;
 
-    while((line = br.readLine()) != null){
+    while ((line = br.readLine()) != null) {
       System.out.println(line);
     }
     socket.close();
 
     System.out.println("Done");
   }
+
+  public void testSomeIBMMessage() throws Exception {
+    disableSslVerification();
+
+    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/payload(51).dat"));
+    //final SOAPMessage message = createMessage(null, new FileInputStream("samples/soap_serialized.xml"));
+    //final SOAPMessage message = deserializeSOAPMessage(new FileInputStream("samples/david.txt"));
+    SOAPMessage message = createMessage();
+    final AttachmentPart part = message.createAttachmentPart();
+    final byte[] bytes = "muhammet".getBytes();
+    part.setContentId("basidnanberi");
+    part.setRawContentBytes(bytes, 0, bytes.length, "application/octet-stream");
+    message.addAttachmentPart(part);
+
+    SOAPElement element = message.getSOAPHeader().addChildElement("Messaging", "eb", "http://docs.oasis-open.org/ebxml-msg/ebms/v3.0/ns/core/200704/");
+    element.addTextNode("User Message");
+    element = message.getSOAPBody().addChildElement("question");
+    element.addTextNode("What is your name?");
+
+    message.saveChanges();
+
+    System.out.println("Describe plain message");
+    System.out.println(describe(message));
+    System.out.println("==================================================");
+    message = signAndEncrypt((SOAPMessage) message, (Corner) Corner.CORNER_2);
+    System.out.println("Describe enc message");
+    System.out.println(describe(message));
+    System.out.println("==================================================");
+
+    message = verifyAndDecrypt(message, Corner.CORNER_3);
+    System.out.println("Describe reopened message");
+    System.out.println(describe(message));
+    System.out.println("==================================================");
+  }
+
 }
